@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Notxl - CSV editor</title>
+    <style>
+        body { margin: 0; overflow-y: hidden; }
+        .text-editor {
+            position: absolute;
+            left: 0;
+            border: none;
+            overflow: hidden;
+            white-space: pre;
+            resize: none;
+            background: rgb(255, 238, 170);
+            outline: none;
+        }
+        .filter-list {
+            position: fixed;
+            bottom: 0;
+            padding: 1px;
+            box-sizing: border-box;
+            width: 100vw;
+        }
+        .filter-line {
+            white-space: nowrap;
+        }
+        .filter-add {
+            float: right;
+            outline: none;
+            cursor: pointer;
+            margin: 2px;
+            border: none;
+            padding: 6px;
+            border-radius: 2px;
+            background: #fa6;
+        }
+        .filter-add>i {
+            color: lightgray;
+            font-style: normal;
+        }
+        .filter-remove {
+            border-radius: 100px;
+            border: none;
+            margin: 6px -23px;
+            background: #fa6;
+            line-height: 12px;
+        }
+        .filter-remove:hover {
+            background: #fff;
+        }
+        .filter-title {
+            width: 80px;
+            padding: 6px;
+            text-align: right;
+            font-family: monospace;
+            color: #666;
+            display: inline-block;
+            background: #fa6;
+            border-top-left-radius: 2px;
+            border-bottom-left-radius: 2px;
+        }
+        .filter-input {
+            width: calc(100% - 320px);
+            background: #eee;
+            padding: 6px;
+            font-family: monospace;
+            box-sizing: border-box;
+            border: none;
+            outline: none;
+            margin-bottom: 1px;
+            border-top-right-radius: 2px;
+            border-bottom-right-radius: 2px;
+        }
+        .filter-input:focus {
+            background: #fea;
+        }
+        .filter-input.invalid {
+            background-color: #fdd;
+        }
+        .dropzone {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            color: silver;
+            text-align: center;
+            z-index: 9999;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: monospace;
+            font-size: 18px;
+        }
+        .drop-ready {
+            background: rgba(240, 240, 255, 0.8);
+        }
+        .progress-bar {
+            width: 200px;
+            height: 4px;
+            background: #fea;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            width: 0%;
+            height: 100%;
+            background: #fa6;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        // Конфигурационные константы
+        const CONSTANTS = {
+            COLORS: {
+                'null or empty string object': 'gray',
+                'basic string object': 'black',
+                'javascript object': 'green',
+                'unif resource l': 'navy',
+                'datetime': 'green',
+                'float': 'blue',
+                'int': 'navy',
+                'hx': 'green',
+                'bool': 'red'
+            },
+            WIDTHS: {
+                'null or empty string object': 3,
+                'basic string object': 6,
+                'javascript object': 10,
+                'unif resource l': 10,
+                'datetime': 6,
+                'float': 5,
+                'int': 3,
+                'hx': 4,
+                'bool': 6
+            },
+            MAX_WIDTHS: {
+                'null or empty string object': 3,
+                'basic string object': 40,
+                'javascript object': 30,
+                'unif resource l': 30,
+                'datetime': 16,
+                'float': 10,
+                'int': 10,
+                'hx': 12,
+                'bool': 6
+            },
+            LINE_HEIGHT: 24,
+            PADDING: 6,
+            SCROLLBAR_WIDTH: 10
+        };
+
+        // Утилиты для работы с CSV
+        class CSVParser {
+            static parseCSV(text) {
+                text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n'); // Нормализуем переносы
+                
+                const lines = [];
+                let currentLine = [];
+                let currentField = '';
+                let inQuotes = false;
+                
+                for (let i = 0; i < text.length; i++) {
+                    const char = text[i];
+                    
+                    if (char === '"') {
+                        if (inQuotes && text[i+1] === '"') {
+                            currentField += '"';
+                            i++;
+                        } else {
+                            inQuotes = !inQuotes;
+                        }
+                    } else if ((char === ',' || char === '\t' || char === ';') && !inQuotes) {
+                        currentField = currentField.replace(/[\n\r]/g, ' ').trim();
+                        currentLine.push(currentField);
+                        currentField = '';
+                    } else if (char === '\n' && !inQuotes) {
+                        currentField = currentField.replace(/[\n\r]/g, ' ').trim();
+                        currentLine.push(currentField);
+                        lines.push(currentLine);
+                        currentLine = [];
+                        currentField = '';
+                    } else {
+                        currentField += char;
+                    }
+                }
+                
+                if (currentField !== '' || text[text.length-1] === ',') {
+                    currentField = currentField.replace(/[\n\r]/g, ' ').trim();
+                    currentLine.push(currentField);
+                }
+                if (currentLine.length > 0) {
+                    lines.push(currentLine);
+                }
+                
+                return lines;
+            }
+
+            static getType(val) {
+                if (typeof(val) !== 'string') {
+                    val = '' + val;
+                }
+                if (val === 'null' || val === 'undefined') {
+                    return 'null or empty string object';
+                }
+                let detected = 'basic string object';
+                try {
+                    JSON.parse(val);
+                    detected = 'javascript object';
+                } catch (e) {}
+                try {
+                    new URL(val);
+                    detected = 'unif resource l';
+                } catch (e) {}
+                if (new Date(val) instanceof Date && !isNaN(new Date(val))) detected = 'datetime';
+                if (/^\d+\.\d+$/.test(val)) detected = 'float';
+                if (parseInt(val) == val) detected = 'int';
+                if (val[0] === '0' && parseInt(val, 16) == val) detected = 'hx';
+                if (val.toLowerCase() === 'true' || val.toLowerCase() === 'false') detected = 'b';
+
+                return detected;
+            }
+
+            static parseTypes(lines) {
+                let types = [];
+                for (let j = 0; j < lines[0].length; j++) {
+                    types.push('b');
+                }
+                for (let i = 1; i < Math.min(100, lines.length); i++) {
+                    let items = lines[i];
+                    for (let j = 0; j < items.length; j++) {
+                        let type = this.getType(items[j]);
+                        if (!types[j] || types[j].length < type.length) {
+                            types[j] = type;
+                        }
+                    }
+                }
+                return types;
+            }
+        }
+
+        // Текстовый редактор для редактирования ячеек
+        class TextEditor {
+            constructor(container = document.body) {
+                this.textarea = document.createElement('textarea');
+                this.textarea.className = 'text-editor';
+                container.appendChild(this.textarea);
+                this.textarea.hidden = true;
+                this.editStart = -1;
+                this.editEnd = -1;
+                
+                // Настройка стилей
+                const fontSize = ((CONSTANTS.LINE_HEIGHT - CONSTANTS.PADDING * 2) | 0) + 'px';
+                this.textarea.style['font-size'] = fontSize;
+                
+                this.textarea.style['padding'] = `0 ${CONSTANTS.PADDING}px`;
+                this.textarea.style['line-height'] = CONSTANTS.LINE_HEIGHT + 'px';
+                
+                // Обработчики событий
+                this.textarea.addEventListener('change', () => this.applyChanges());
+                this.textarea.addEventListener('keydown', (e) => this.handleKeyDown(e));
+                this.textarea.addEventListener('paste', e => this.handlePaste(e));
+            }
+
+            formatCells(content, widths) {
+                return content.map(line => {
+                    return line.map((cell, index) => {
+                        const cellText = String(cell || '');
+                        const targetWidth = widths[index] || cellText.length;
+                        
+                        // Выравниваем текст без добавления запятой
+                        return cellText.padEnd(targetWidth);
+                    }).join(','); // Добавляем запятые только между ячейками
+                }).join('\n');
+            }
+
+            showEditArea(position, size, content, widths) {
+                this.textarea.hidden = false;
+                this.textarea.style.width = size.width + 'px';
+                this.textarea.style.top = position.top + 'px';
+                this.textarea.style.height = size.height + 'px';
+                if (content) {
+                    const cleanedContent = content.map(line => 
+                        line.map(cell => String(cell || '').replace(/[\n,]/g, '').trim())
+                    );
+                    
+                    this.textarea.value = this.formatCells(cleanedContent, widths);
+                }
+                this.textarea.focus();
+                this.textarea.select();
+
+                this.onEditorOpen?.();
+            }
+
+            hide() {
+                this.textarea.hidden = true;
+            }
+
+            isOpen() {
+                return !this.textarea.hidden;
+            }
+
+            setEditRange(start, end) {
+                this.editStart = start;
+                this.editEnd = end;
+            }
+
+            applyChanges() {
+                if (this.textarea.hidden) return;
+                this.hide();
+
+                if (this.onEditorChange) {
+                    let lines = CSVParser.parseCSV(this.textarea.value);
+                    this.onEditorChange(lines);
+                }
+            }
+
+            handleKeyDown(e) {
+                if (e.key == 'Tab') {
+                    e.preventDefault();
+                    var start = this.textarea.selectionStart;
+                    var end = this.textarea.selectionEnd;
+                    // set textarea value to: text before caret + tab + text after caret
+                    this.textarea.value = this.textarea.value.substring(0, start) + "\t" + this.textarea.value.substring(end);
+                    // put caret at right position again
+                    this.textarea.selectionStart = this.textarea.selectionEnd = start + 1;
+                }
+
+                if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    this.applyChanges();
+                } else if (e.key === "Enter" || e.key === "Backspace") {
+                    this.resize();
+                } else if (e.key === 'Escape') {
+                    this.hide();
+                }
+            }
+
+            resize() {
+                setTimeout(() => {
+                    const linesCount = this.textarea.value.split('\n').length;
+                    this.textarea.style.height = (linesCount * CONSTANTS.LINE_HEIGHT) + 'px';
+                }, 1);
+            }
+
+            handlePaste(e) {
+                const pastedText = e.clipboardData.getData('text/plain');
+                
+                let maxLines = Math.floor(window.innerHeight / CONSTANTS.LINE_HEIGHT);
+                if (pastedText.split('\n').length > 5) {
+                    e.preventDefault();
+                    
+                    const currentValue = this.textarea.value;
+                    const beforeSelection = currentValue.substring(0, this.textarea.selectionStart);
+                    const afterSelection = currentValue.substring(this.textarea.selectionEnd);
+                    let result = beforeSelection + pastedText + afterSelection;
+
+                    if (this.onEditorChange) {
+                        let lines = CSVParser.parseCSV(result);
+                        this.hide();
+                        this.onEditorChange(lines);
+                        return;
+                    }
+                }
+                // Для небольших вставок - стандартное поведение
+                this.resize();
+            }
+        }
+
+        class InputWithAutocomplete {
+            constructor(container, className, placeholder = '...') {
+                this.input = document.createElement('input');
+                this.input.type = 'text';
+                this.input.className = className;
+                this.input.placeholder = placeholder;
+                
+                container.appendChild(this.input);
+
+                this.autocomplete = [];
+
+                this.input.addEventListener('keyup', e => {
+                    if (e.key.startsWith('Arrow')) return;
+
+                    if (e.key !== 'Backspace') {
+                        let incomplete = this.suggest();
+
+                        if (!incomplete) {
+                            this.fixTypos();
+                        }
+                    }
+
+                    let isValid = this.onChange(this.input.value);
+                    this.input.classList.toggle('invalid', !isValid && this.input.value);
+                });
+            }
+
+            suggest() {
+                const cursorPos = this.input.selectionStart;
+                const fullText = this.input.value;
+
+                if (cursorPos < fullText.length && fullText[cursorPos].match(/[\w"']/)) {
+                    return false;
+                }
+                
+                const textBeforeCursor = fullText.substring(0, cursorPos);
+                const textAfterCursor = fullText.substring(cursorPos);
+                const wordMatch = textBeforeCursor.match(/([\w"']+)$/);
+                if (!wordMatch) return;
+
+                const partialWord = wordMatch[1];
+                const wordStart = wordMatch.index;
+                
+                for (let item of this.autocomplete) {
+                    if (item.toLowerCase().startsWith(partialWord.toLowerCase())) {
+                        const rest = item.substring(partialWord.length);
+                        
+                        this.input.value = textBeforeCursor + rest + textAfterCursor;
+                        this.input.setSelectionRange(
+                            wordStart + partialWord.length, 
+                            wordStart + item.length,
+                            'backward' // Выделение в обратном направлении (для удобства замены)
+                        );
+                        
+                        return true;
+                    }
+                }
+            }
+
+            fixTypos() {
+                const text = this.input.value;
+                let result = '';
+                let currentWord = '';
+
+                for (let i = 0; i < text.length; i++) {
+                    const char = text[i];
+                    
+                    // Если это буква - добавляем к текущему слову
+                    if (/[a-zA-Z]/.test(char)) {
+                        currentWord += char;
+                    } else {
+                        // Если нашли не-буквенный символ - обрабатываем накопленное слово
+                        if (currentWord) {
+                            result += this.correctWord(currentWord);
+                            currentWord = '';
+                        }
+                        result += char; // Добавляем сам символ без изменений
+                    }
+                }
+
+                // Обрабатываем последнее слово, если оно есть
+                if (currentWord) {
+                    result += this.correctWord(currentWord);
+                }
+
+                this.input.value = result;
+            }
+
+            correctWord(word) {
+                // Ищем точное совпадение без учета регистра
+                for (let item of this.autocomplete) {
+                    if (item.toLowerCase() === word.toLowerCase()) {
+                        return item; // Возвращаем слово с правильным регистром
+                    }
+                }
+
+                // Ищем похожие слова (максимум 1 опечатка)
+                let bestMatch = null;
+                let minDistance = Infinity;
+
+                for (let item of this.autocomplete) {
+                    const distance = this.levenshteinDistance(word.toLowerCase(), item.toLowerCase());
+                    if (distance < minDistance && distance <= 1) {
+                        minDistance = distance;
+                        bestMatch = item;
+                    }
+                }
+
+                return bestMatch || word; // Возвращаем исправленное слово или оригинал, если не нашли совпадения
+            }
+
+            // Алгоритм Левенштейна для поиска расстояния между строками
+            levenshteinDistance(a, b) {
+                const matrix = [];
+                
+                for (let i = 0; i <= b.length; i++) {
+                    matrix[i] = [i];
+                }
+                
+                for (let j = 0; j <= a.length; j++) {
+                    matrix[0][j] = j;
+                }
+                
+                for (let i = 1; i <= b.length; i++) {
+                    for (let j = 1; j <= a.length; j++) {
+                        if (b.charAt(i-1) === a.charAt(j-1)) {
+                            matrix[i][j] = matrix[i-1][j-1];
+                        } else {
+                            matrix[i][j] = Math.min(
+                                matrix[i-1][j-1] + 1,
+                                matrix[i][j-1] + 1,
+                                matrix[i-1][j] + 1
+                            );
+                        }
+                    }
+                }
+                
+                return matrix[b.length][a.length];
+            }
+
+            setAutocompleteList(arr) {
+                arr = arr.map(item => item.trim());
+                this.autocomplete = arr;
+            }
+        }
+
+        class FilterList {
+            constructor(container = document.body) {
+                this.filters = [];
+                this.availableFields = [];
+
+                this.div = document.createElement('div');
+                this.div.className = 'filter-list';
+                container.appendChild(this.div);
+
+                let openFilterBtn = document.createElement('button');
+                openFilterBtn.innerHTML = '<i>ctrl</i>+Filter';
+                openFilterBtn.className = 'filter-add';
+                this.div.appendChild(openFilterBtn);
+                openFilterBtn.onclick = (e) => {
+                    this.toggleFilter();
+                };
+
+                let addColumnBtn = document.createElement('button');
+                addColumnBtn.innerHTML = '<i>ctrl</i>+Extend';
+                addColumnBtn.className = 'filter-add';
+                this.div.appendChild(addColumnBtn);
+                addColumnBtn.onclick = (e) => {
+                    this.addLine(this.genColumnPlaceholder(), 'Column:');
+                };
+
+                this.filterLine = this.addLine('*', 'Filter:', false);
+                this.filterLine.button.onclick = false;
+                this.filterLine.button.innerText = '';
+                this.filterLine.container.hidden = true;
+            }
+
+            toggleFilter() {
+                this.filterLine.container.hidden = false;
+                this.filterLine.input.focus();
+                this.filterLine.input.select();
+            }
+
+            hide() {
+                this.filterLine.container.hidden = true;
+            }
+
+            setFilteredCount(count) {
+                if (count >= 0) {
+                    this.filterLine.button.innerText = count;
+                } else {
+                    this.filterLine.button.innerText = 'err';
+                }
+            }
+
+            addLine(placeholder, title, needAutocomplete = true) {
+                const lineDiv = document.createElement('div');
+                lineDiv.className = 'filter-line';
+
+                const titleSpan = document.createElement('span');
+                titleSpan.className = 'filter-title';
+                titleSpan.innerText = title;
+                lineDiv.appendChild(titleSpan);
+
+                // Поле фильтра
+                const filter = new InputWithAutocomplete(lineDiv, 'filter-input', placeholder);
+                filter.setAutocompleteList(this.availableFields);
+                filter.onChange = () => this.refilter();
+                
+                // Кнопка удаления
+                const removeBtn = document.createElement('button');
+                removeBtn.textContent = '×';
+                removeBtn.className = 'filter-remove';
+                removeBtn.onclick = () => {
+                    if (filter === this.filterLine) {
+                        this.filterLine = null;
+                    }
+                    lineDiv.remove();
+                    this.refilter();
+                };
+
+                lineDiv.appendChild(removeBtn);
+                filter.button = removeBtn;
+
+                this.div.appendChild(lineDiv);
+
+                if (needAutocomplete) {
+                    this.filters.push(filter);
+                }
+
+                filter.input.focus();
+                filter.input.select();
+                filter.container = lineDiv;
+                filter.title = titleSpan;
+
+                return filter;
+            }
+
+            refilter() {
+                let code = '';
+                let newVars = new Set();
+                let wildcardFilter = this.filterLine.input.value;
+
+                for (let filter of this.filters) {
+                    let filterStr = filter.input.value;
+                    filter.title.innerText = 'Column:';
+
+                    if (filterStr) {
+                        let newVar = this.getNewVariableName(filterStr);
+                        if (!newVar) {
+                        } else {
+                            filter.title.innerText = newVar + ':';
+                            newVars.add(newVar);
+                            code += filterStr + ';\n';
+                        }
+                    }
+                }
+
+                return this.onFilterListChange(wildcardFilter, code, Array.from(newVars));
+            }
+
+            getNewVariableName(filterStr) {
+                let eqInd = filterStr.indexOf('=');
+                if (eqInd !== -1) {
+                    if (filterStr[eqInd + 1] !== '=') {
+                        let name = filterStr.substr(0, eqInd).trim();
+                        if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) {
+                            return name;
+                        }
+                    }
+                }
+            }
+
+            setAutocompleteList(arr) {
+                this.availableFields = arr;
+
+                for (let filter of this.filters) {
+                    if (typeof(filter.setAutocompleteList) !== 'function') debugger
+                    filter.setAutocompleteList(arr);
+                }
+            }
+
+            genFilterPlaceholder() {
+                let fields = this.availableFields;
+                if (fields.length === 0) fields = ['Area', 'Bids', 'Count', 'Quality', 'Items'];
+
+                let text = '';
+
+                function rnd() {
+                    return arguments[Math.floor(Math.random() * arguments.length)];
+                };
+
+                for (let i = 0; i < rnd(1, 2, 3, 5); i++) {
+                    if (rnd(true, false)) {
+                        let field = rnd(...fields);
+                        let op = rnd('==("', '!=("', '.includes("');
+                        let val = rnd(field.toLowerCase().substr(0, 2), 'text', 'str');
+                        text += field + op + val + '")';
+                    } else {
+                        let field = rnd(...fields);
+                        let op = rnd('==', '!=', '>', '<', '>=', '<=');
+                        let val = (Math.random() * 100).toFixed(rnd(0, 0, 2));
+                        text += field + op + val;
+                    }
+                    text += rnd(' && ', ' || ');
+                }
+                return text.substr(0, text.length - 4);
+            }
+
+            genColumnPlaceholder() {
+                let fields = this.availableFields;
+                if (fields.length === 0) fields = ['Area', 'Bids', 'Count', 'Quality', 'Items'];
+
+                function rnd() {
+                    return arguments[Math.floor(Math.random() * arguments.length)];
+                };
+
+                let name = rnd('Total', 'NewColumn', ...fields.map(name => name + (this.filters.length + 1)));
+
+                let text = name + ' = ';
+
+                let dot = rnd(0, 0, 2);
+
+                for (let i = 0; i < rnd(1, 2, 3, 5); i++) {
+                    let field = rnd(...fields);
+                    let op = rnd('*', '/', '*', '/', '**', '%');
+                    let val = (Math.random() * 100).toFixed(dot);
+                    text += field + op + val;
+                    text += rnd(' + ', ' - ');
+                }
+                return text.substr(0, text.length - 3);
+            }
+
+            applyWildcardFilter(lines, filterStr) {
+                const parts = filterStr.split('*').map(part => part.toLowerCase()).filter(part => part !== '');
+                
+                let newTable = [lines[0] || []],
+                    indexMap = [0];
+
+                if (parts.length === 0) {
+                    return { lines: newTable, indexMap: null };
+                }
+
+                for (let i = 1; i < lines.length; i++) {
+                    const lineString = lines[i].join(',').toLowerCase();
+                    
+                    let currentIndex = 0;
+                    let allPartsFound = true;
+
+                    for (const part of parts) {
+                        const foundIndex = lineString.indexOf(part, currentIndex);
+                        if (foundIndex === -1) {
+                            allPartsFound = false;
+                            break;
+                        }
+                        currentIndex = foundIndex + part.length;
+                    }
+
+                    if (allPartsFound) {
+                        newTable.push(lines[i]);
+                        indexMap.push(i);
+                    }
+                }
+
+                return { lines: newTable, indexMap: indexMap };
+            }
+
+        }
+
+
+        // Основной компонент таблицы
+        class TableView {
+            constructor(container = document.body) {
+                this.canvas = document.createElement('canvas');
+                container.appendChild(this.canvas);
+                this.ctx = this.canvas.getContext('2d');
+                
+                this.lines = [];
+                this.types = [];
+                this.indexMap = [];
+                this.offsetLine = 0;
+                this.selectionStart = -1;
+                this.selectionEnd = -1;
+                this.scrolling = false;
+                this.charWidth = null;
+                this.maxLines = null;
+                
+                // Настройка контекста
+                this.ctx.imageSmoothingEnabled = false;
+
+                const fontSize = CONSTANTS.LINE_HEIGHT - CONSTANTS.PADDING * 2;
+                this.ctx.font = fontSize + 'px monospace';
+                this.charWidth = this.ctx.measureText('M').width;
+            }
+
+            init() {
+                this.onResize();
+                window.addEventListener('resize', () => this.onResize());
+            }
+
+            onResize() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+                this.maxLines = Math.floor(this.canvas.height / CONSTANTS.LINE_HEIGHT);
+                this.draw();
+            }
+
+            setLines(lines, types, indexMap) {
+                this.lines = lines;
+                this.types = types;
+                this.indexMap = indexMap || Array.from({ length: lines.length }, (_, i) => i);
+                this.draw();
+            }
+
+            draw() {
+                this.canvas.width = this.canvas.width;
+
+                if (!this.lines || !this.types) return;
+                if (!this.lines.length || !this.types.length) return;
+                
+                const widths = [];
+                const colors = [];
+                const maxWidths = [];
+                
+                // Подготовка данных для отрисовки
+                for (let type of this.types) {
+                    widths.push(CONSTANTS.WIDTHS[type] || 10);
+                    maxWidths.push(CONSTANTS.MAX_WIDTHS[type] || 30);
+                    colors.push(CONSTANTS.COLORS[type] || 'black');
+                }
+                
+                // Корректировка ширины столбцов
+                this.correctWidths(widths, maxWidths);
+                
+                // Расчет полной ширины таблицы
+                let totalWidth = CONSTANTS.PADDING * 2 + this.charWidth * widths.length + 
+                                this.charWidth * widths.reduce((a, b) => a + b) + 
+                                CONSTANTS.SCROLLBAR_WIDTH + 1;
+
+                if (totalWidth > this.canvas.width) {
+                    this.canvas.width = totalWidth;
+                }
+                
+                const fontSize = CONSTANTS.LINE_HEIGHT - CONSTANTS.PADDING * 2;
+                this.ctx.font = fontSize + 'px monospace';
+
+                // Отрисовка заголовка
+                const background = this.isSelected(0) ? '#fea' : '#fa6';
+                this.drawLine(this.lines[0], 0, [], widths, background);
+
+                let offset = this.getOffset();
+
+                // Отрисовка строк данных
+                for (let i = 1; i < Math.min(this.maxLines + 1, this.lines.length - offset); i++) {
+                    const lineIndex = i + offset;
+                    const background = this.isSelected(lineIndex) ? '#fea' : 'white';
+
+                    this.drawLine(this.lines[lineIndex], CONSTANTS.LINE_HEIGHT * i, colors, widths, background);
+                }
+                
+                // Отрисовка скроллбара
+                this.drawScrollbar();
+            }
+
+            getOffset() {
+                let offset = this.offsetLine;
+                if (offset > this.lines.length - this.maxLines + 1) {
+                    offset = this.lines.length - this.maxLines + 1;
+                }
+                if (offset < 0) {
+                    offset = 0;
+                }
+                return offset;
+            }
+
+            isSelected(lineIndex) {
+                if (this.selectionEnd > this.selectionStart) {
+                    return lineIndex >= this.selectionStart && 
+                        lineIndex <= this.selectionEnd && 
+                        this.selectionStart !== -1;
+                } else {
+                    return lineIndex <= this.selectionStart && 
+                        lineIndex >= this.selectionEnd && 
+                        this.selectionStart !== -1;
+                }
+            }
+
+            correctWidths(widths, maxWidths) {
+                // заголовки обрабатываем отдельно
+                for (let j = 0; j < 1; j++) {
+                    const items = this.lines[j];
+                    if (items !== undefined) {
+                        for (let i = 0; i < items.length; i++) {
+                            let item = '' + items[i];
+                            if (widths[i] < item.length) {
+                                widths[i] = Math.min(maxWidths[i], item.length);
+                            }
+                        }
+                    }
+                }
+
+                let offset = this.getOffset();
+
+                for (let j = offset; j < Math.min(offset + this.maxLines, this.lines.length); j++) {
+                    const items = this.lines[j];
+                    if (items !== undefined) {
+                        for (let i = 0; i < items.length; i++) {
+                            let item = '' + items[i];
+                            if (widths[i] < item.length) {
+                                widths[i] = Math.min(maxWidths[i], item.length);
+                            }
+                        }
+                    }
+                }
+            }
+
+            drawLine(items, y, colors, widths, background) {
+                let x = CONSTANTS.PADDING;
+                this.ctx.lineWidth = 1;
+                this.ctx.textBaseline = 'top';
+                
+                // Фон строки
+                this.ctx.fillStyle = background;
+                this.ctx.fillRect(0, y, 4096, CONSTANTS.LINE_HEIGHT);
+                
+                // Отрисовка ячеек
+                items.forEach((text, i) => {
+                    text = '' + text;
+                    const color = colors[i] || 'black';
+                    const width = widths[i] || 20;
+                    const displayText = text.length > width ? text.substring(0, width - 1) + '…' : text;
+                    
+                    this.ctx.fillStyle = color;
+                    this.ctx.fillText(
+                        displayText, 
+                        x, 
+                        y + 1 + CONSTANTS.PADDING
+                    );
+                    
+                    x += width * this.charWidth + this.charWidth;
+                });
+                
+                // Разделитель строк
+                this.ctx.strokeStyle = '#f0f0f0';
+                this.ctx.beginPath();
+                this.ctx.moveTo(0, y + CONSTANTS.LINE_HEIGHT - 0.5);
+                this.ctx.lineTo(4096, y + CONSTANTS.LINE_HEIGHT);
+                this.ctx.stroke(); 
+            }
+
+            drawScrollbar() {
+                const { canvas, ctx } = this;
+                const totalWidth = canvas.width;
+                const totalHeight = canvas.height;
+                const scrollbarWidth = CONSTANTS.SCROLLBAR_WIDTH;
+                const scrollbarHeight = scrollbarWidth * 3;
+                
+                const percent = this.offsetLine / Math.max(1, this.lines.length - this.maxLines);
+                const y = (totalHeight - scrollbarHeight) * percent;
+                
+                ctx.fillStyle = '#eee';
+                ctx.fillRect(totalWidth - scrollbarWidth, 0, scrollbarWidth, totalHeight);
+                
+                ctx.fillStyle = '#fa6';
+                ctx.fillRect(totalWidth - scrollbarWidth, y, scrollbarWidth, scrollbarHeight);
+            }
+
+            getLineIndexFromMouse(e) {
+                const rect = this.canvas.getBoundingClientRect();
+                const y = e.clientY - rect.top;
+                let line = Math.floor(y / CONSTANTS.LINE_HEIGHT) + this.offsetLine;
+                return Math.min(line, this.lines.length);
+            }
+
+            getScrollFromMouse(e) {
+                const rect = this.canvas.getBoundingClientRect();
+                const y = Math.max(0, Math.min(e.clientY - rect.top, this.canvas.height));
+                return Math.floor((y / this.canvas.height) * Math.max(1, this.lines.length - this.maxLines));
+            }
+
+            scrollTo(line) {
+                this.offsetLine = Math.max(
+                    0, 
+                    Math.min(this.lines.length - this.maxLines, line)
+                );
+                this.draw();
+            }
+        }
+
+        class CSVFileDropzone {
+            constructor(container = document.body) {
+                this.onDrop = null;
+                
+                this.dropzone = document.createElement('div');
+                this.dropzone.className = 'dropzone';
+                this.dropzone.innerText = 'drop .csv here\nmax size 2GB';
+                
+                container.appendChild(this.dropzone);
+
+                container.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    this.dropzone.classList.add('drop-ready');
+                });
+                
+                container.addEventListener('dragleave', (e) => {
+                    e.preventDefault();
+                    this.dropzone.classList.remove('drop-ready');
+                });
+                
+                container.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    this.dropzone.classList.remove('drop-ready');
+                    this.showProgress();
+                    setTimeout((files) => this.handleFileDrop(files), 300, e.dataTransfer.files);
+                });
+            }
+            
+            handleFileDrop(files) {
+                if (files.length === 0) return;
+
+                const file = files[0];
+                if (!file.name.toLowerCase().endsWith('.csv')) {
+                    this.dropzone.innerText = 'drop .csv here\nmax size 2GB';
+                    return;
+                }
+                
+                const reader = new FileReader();
+                
+                reader.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        const percent = (e.loaded / e.total) * 100;
+                        this.updateProgress(percent);
+                    }
+                };
+                
+                reader.onload = (e) => {
+                    this.completeProgress(e.target.result);
+                };
+                
+                reader.onerror = (e) => {
+                    this.dropzone.innerText = 'drop .csv here\nmax size 2GB';
+                };
+                
+                reader.readAsText(file);
+            }
+
+            showProgress() {
+                this.dropzone.innerHTML = '<div class="progress-bar"><div class="progress-fill"></div></div>';
+                this.progressFill = this.dropzone.querySelector('.progress-fill');
+                this.progressFill.style.width = '0%';
+            }
+
+            updateProgress(percent) {
+                if (this.progressFill) {
+                    this.progressFill.style.width = percent + '%';
+                }
+            }
+
+            completeProgress(data) {
+                this.updateProgress(100);
+                setTimeout((data) => {
+                    this.hide();
+
+                    if (this.onDrop) {
+                        this.onDrop(data);
+                    }
+                }, 300, data);
+            }
+
+            hide() {
+                this.dropzone.hidden = true;
+                this.dropzone.style.display = 'none';
+            }
+        }
+
+        // Главный контроллер приложения
+        class CSVApp {
+            constructor() {
+                this.lines = [];
+                this.types = [];
+                this.tableView = new TableView();
+                this.textEditor = new TextEditor();
+                this.filterList = new FilterList();
+                this.dropzone = new CSVFileDropzone();
+
+                this.textEditor.onEditorOpen = () => {
+                    this.dropzone.hide();
+                    this.clearSelection();
+                };
+
+                this.textEditor.onEditorChange = (changes) => {
+                    this.applyTextChanges(changes);
+                };
+
+                this.filterList.onFilterListChange = (newFilter, newColumnsCode, newVars) => {
+                    return this.applyFilter(newFilter, newColumnsCode, newVars);
+                };
+
+                this.dropzone.onDrop = (text) => {
+                    this.lines = CSVParser.parseCSV(text);
+                    this.types = CSVParser.parseTypes(this.lines);
+                    this.filterList.refilter();
+                    this.filterList.setAutocompleteList(this.lines[0]);
+                };
+
+                this.tableView.init();
+                
+                // Привязка обработчиков событий
+                this.tableView.canvas.addEventListener('mousedown', e => this.handleMouseDown(e));
+                document.addEventListener('mousemove', e => this.handleMouseMove(e));
+                document.addEventListener('mouseup', () => this.handleMouseUp());
+                //document.addEventListener('mouseleave', () => this.handleMouseLeave());
+                this.tableView.canvas.addEventListener('wheel', e => this.handleWheel(e));
+                document.addEventListener('keydown', e => this.handleKeyDown(e));
+            }
+
+            clearSelection() {
+                this.tableView.selectionStart = -1;
+                this.tableView.selectionEnd = -1;
+                if (this.tableView.lines) {
+                    this.tableView.draw();
+                }
+            }
+
+            handleMouseDown(e) {
+                this.clearSelection();
+
+                if (this.textEditor.isOpen()) {
+                    this.textEditor.applyChanges();
+                    this.textEditor.hide();
+                    this.clearSelection();
+                    return;
+                }
+
+                // Обработка скроллбара
+                let scrollLeft = e.target.parentElement.parentElement.scrollLeft; // document.scrollLeft
+                if (e.clientX + scrollLeft > e.target.width - CONSTANTS.SCROLLBAR_WIDTH * 4) {
+                    this.tableView.scrolling = true;
+                    this.tableView.offsetLine = this.tableView.getScrollFromMouse(e);
+                    this.tableView.draw();
+                    return;
+                }
+
+                // Выделение строки
+                this.tableView.selectionStart = this.tableView.getLineIndexFromMouse(e);
+                this.tableView.selectionEnd = this.tableView.selectionStart;
+                this.tableView.draw();
+            }
+
+            handleMouseMove(e) {
+                if (!this.tableView.lines) return;
+                
+                // Перетаскивание скроллбара
+                if (this.tableView.scrolling) {
+                    this.tableView.offsetLine = this.tableView.getScrollFromMouse(e);
+                    this.tableView.draw();
+                    return;
+                }
+
+                // Выделение диапазона
+                if (this.tableView.selectionStart === -1) return;
+                
+                const lineIndex = this.tableView.getLineIndexFromMouse(e);
+                this.tableView.selectionEnd = lineIndex;
+                this.tableView.draw();
+            }
+
+            handleMouseUp() {
+                if (this.tableView.scrolling) {
+                    this.tableView.scrolling = false;
+                    return;
+                }
+
+                if (this.tableView.selectionStart === -1) return;
+                
+                // Нормализация диапазона выделения
+                if (this.tableView.selectionEnd < this.tableView.selectionStart) {
+                    [this.tableView.selectionStart, this.tableView.selectionEnd] = 
+                    [this.tableView.selectionEnd, this.tableView.selectionStart];
+                }
+
+                // Показ редактора
+                this.showEditor();
+            }
+
+            showEditor() {
+                const { selectionStart, selectionEnd } = this.tableView;
+                // selectionStart/End - это индексы в ОТФИЛЬТРОВАННОМ массиве (tableView.lines)
+
+                // 1. Получаем исходные индексы с помощью indexMap
+                const sourceStartIndex = this.tableView.indexMap[selectionStart];
+                const sourceEndIndex = this.tableView.indexMap[selectionEnd];
+
+                // 2. Берем данные для редактора из ОТФИЛЬТРОВАННОГО вида (так видит пользователь)
+                const lines = this.tableView.lines.slice(selectionStart, selectionEnd + 1);
+                
+                const position = {
+                    top: (selectionStart - this.tableView.offsetLine) * CONSTANTS.LINE_HEIGHT
+                };
+                
+                const size = {
+                    width: this.tableView.canvas.width - CONSTANTS.SCROLLBAR_WIDTH - CONSTANTS.PADDING,
+                    height: ((selectionEnd - selectionStart + 1) * CONSTANTS.LINE_HEIGHT)
+                };
+
+                const widths = [];
+                const maxWidths = [];
+                
+                for (let type of this.types) {
+                    widths.push(CONSTANTS.WIDTHS[type] || 10);
+                    maxWidths.push(CONSTANTS.MAX_WIDTHS[type] || 30);
+                }
+                
+                this.tableView.correctWidths(widths, maxWidths);
+                
+                // 3. Но запоминаем в textEditor ИСХОДНЫЕ индексы!
+                this.textEditor.setEditRange(sourceStartIndex, sourceEndIndex);
+                
+                this.textEditor.showEditArea(position, size, lines, widths);
+            }
+
+            handleMouseLeave() {
+                this.tableView.scrolling = false;
+                this.tableView.selectionStart = -1;
+                this.tableView.selectionEnd = -1;
+                this.textEditor.hide();
+                if (this.tableView.lines) this.tableView.draw();
+            }
+
+            handleWheel(e) {
+                if (e.shiftKey) return;
+                e.preventDefault();
+                this.textEditor.hide();
+                
+                if (!this.tableView.lines) return;
+                
+                const maxOffset = Math.max(0, this.tableView.lines.length - this.tableView.maxLines);
+                this.tableView.offsetLine = Math.min(
+                    maxOffset, 
+                    Math.max(0, this.tableView.offsetLine + Math.sign(e.deltaY))
+                );
+                
+                this.tableView.draw();
+            }
+
+            handleKeyDown(e) {
+                if (e.ctrlKey && e.code === 'KeyF') {
+                    e.preventDefault();
+                    this.textEditor.hide();
+                    this.filterList.toggleFilter();
+                }
+
+                if (e.ctrlKey && e.code === 'KeyE') {
+                    e.preventDefault();
+                    this.textEditor.hide();
+                    this.filterList.addLine(this.filterList.genColumnPlaceholder());
+                }
+
+                if (e.code === 'Escape') {
+                    this.textEditor.hide();
+                    this.filterList.hide();
+                }
+            }
+
+            applyTextChanges(changes) {
+                if (!changes) return;
+
+                const { editStart, editEnd } = this.textEditor;
+                const deleteCount = editEnd - editStart + 1;
+
+                // Создаем новый массив, объединяя части старого и новые изменения
+                // Это избегает мутаций и потенциально быстрее для очень больших массивов
+                this.lines = [
+                    ...this.lines.slice(0, editStart),
+                    ...changes,
+                    ...this.lines.slice(editEnd + 1)
+                ];
+
+                this.types = CSVParser.parseTypes(this.lines);
+                this.filterList.refilter();
+                this.filterList.setAutocompleteList(this.lines[0]);
+            }
+
+            applyTextChanges1(changes) {
+                if (!changes) return;
+                
+                const { editStart, editEnd } = this.textEditor;
+                const deleteCount = editEnd - editStart + 1;
+
+                // Для очень больших массивов используем пакетную обработку
+                if (changes.length > 100) {
+                    // Удаляем старые элементы
+                    this.lines.splice(editStart, deleteCount);
+                    
+                    // Добавляем новые элементы порциями
+                    const chunkSize = 100;
+                    for (let i = 0; i < changes.length; i += chunkSize) {
+                        const chunk = changes.slice(i, i + chunkSize);
+                        this.lines.splice(editStart + i, 0, ...chunk);
+                    }
+                } else {
+                    // Для небольших массивов используем обычный подход
+                    this.lines.splice(editStart, deleteCount, ...changes);
+                }
+                
+                this.types = CSVParser.parseTypes(this.lines);
+                this.tableView.setLines(this.lines, this.types);
+                this.tableView.draw();
+                this.filterList.setAutocompleteList(this.lines[0]);
+            }
+
+            applyFilter(newFilter, newColumnsCode, newVars) {
+                let lines = this.lines,
+                    types = this.types,
+                    indexMap,
+                    isValid = true;
+
+                if (newColumnsCode) {
+                    try {
+                        let modifier = this.compile(newColumnsCode, newVars);
+                        lines = modifier(this.lines);
+                        types = CSVParser.parseTypes(lines);
+                    } catch (e) {
+                        isValid = false;
+                    }
+                }
+
+                if (newFilter) {
+                    // !!! ВАЖНО: Создаем карту соответствия !!!
+                    // Для этого нам нужно знать, какие ИСХОДНЫЕ индексы прошли фильтр.
+                    let result = this.filterList.applyWildcardFilter(lines, newFilter);
+
+                    lines = result.lines;
+                    indexMap = result.indexMap;
+                }
+
+                if (lines) {
+                    this.filterList.setFilteredCount(lines.length - 1);
+                    this.tableView.setLines(lines, types, indexMap);
+                    return isValid;
+                }
+
+                this.filterList.setFilteredCount(-1);
+                return true;
+            }
+
+            compile(userCode, newColumns) {
+                if (!this.lines) {
+                    return;
+                }
+
+                let names = [...this.lines[0]];
+
+                if (newColumns) {
+                    for (let name of newColumns) {
+                        names.push(name);
+                    }
+                }
+
+                // Оборачиваем пользовательский код для правильной обработки
+                const wrappedCode = `
+                    return function processTable(table) {
+                        "use strict";
+                        let newTable = [[${names.map(name => '"' + name + '"').join(',')}]];
+                        for (let i = 1; i < table.length; i++) {
+                            let [${names.join(',')}] = table[i];
+
+                            // Пользовательский код выполняется в контексте строки
+                            ${userCode}
+                            
+                            newTable.push([${names.join(',')}]);
+                        }
+                        return newTable;
+                    }
+                `;
+
+                return new Function(wrappedCode)();
+            }
+        }
+
+        // Инициализация приложения
+        let app = new CSVApp();
+    </script>
+</body>
+</html>
