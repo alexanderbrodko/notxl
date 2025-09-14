@@ -14,14 +14,16 @@
             height: 100vh;
             overflow-y: hidden;
         }
-        .tableview-scroll-container {
+        .scroll-container {
             width: 100%;
             height: 100%;
             overflow: auto;
             position: fixed;
             top: 0;
         }
-        .tableview-virtual-area {
+        .virtual-area {
+            padding-left: 100px;
+            padding-bottom: 100px;
         }
         .tableview-canvas {
             backface-visibility: hidden;
@@ -282,7 +284,7 @@
                 const fontSize = ((CONSTANTS.LINE_HEIGHT - CONSTANTS.PADDING * 2) | 0) + 'px';
                 this.textarea.style['font-size'] = fontSize;
                 
-                this.textarea.style['padding'] = `0 ${CONSTANTS.PADDING}px`;
+                this.textarea.style['padding'] = `1px ${CONSTANTS.PADDING}px`;
                 this.textarea.style['line-height'] = CONSTANTS.LINE_HEIGHT + 'px';
                 
                 // Обработчики событий
@@ -774,21 +776,6 @@
                 container.appendChild(this.canvas);
                 this.ctx = this.canvas.getContext('2d');
 
-                const scrollContainer = document.createElement('div');
-                scrollContainer.className = 'tableview-scroll-container';
-                this.virtualArea = document.createElement('div');
-                this.virtualArea.className = 'tableview-virtual-area';
-                scrollContainer.appendChild(this.virtualArea);
-                container.appendChild(scrollContainer);
-
-                scrollContainer.addEventListener('scroll', () => {
-                    const scrollX = scrollContainer.scrollLeft;
-                    const scrollY = scrollContainer.scrollTop;
-                    this.setScrollValueX(scrollX / this.totalWidth);
-                    this.setScrollValueY(scrollY / this.totalHeight);
-                    this.draw();
-                });
-                
                 this.lines = [];
                 this.types = [];
                 this.indexMap = [];
@@ -800,6 +787,7 @@
                 this.maxLines = null;
                 this.totalWidth = 0;
                 this.totalHeight = 0;
+                this.scrollTopOffset = 0;
 
                 const fontSize = CONSTANTS.LINE_HEIGHT - CONSTANTS.PADDING * 2;
                 this.ctx.font = fontSize + 'px monospace';
@@ -841,22 +829,18 @@
                 this.draw();
             }
 
-            setVirtualAreaSize(width, height) {
-                this.virtualArea.style.width = width + 'px';
-                this.virtualArea.style.height = height + 'px';
-            }
+            setScrollValue(xval, yval) {
+                xval /= this.totalWidth;
+                this.offsetX = Math.floor(xval * this.totalWidth);
 
-            setScrollValueX(val01) {
-                this.offsetX = Math.floor(val01 * (this.totalWidth + 100));
-            }
+                this.scrollTopOffset = yval % CONSTANTS.LINE_HEIGHT;
 
-            setScrollValueY(val01) {
-                let line = Math.floor(val01 * (this.lines.length + 10));
+                yval /= this.totalHeight;
+                let line = Math.floor(yval * this.lines.length);
 
-                this.offsetLine = Math.max(
-                    0, 
-                    Math.min(this.lines.length - this.maxLines, line)
-                );
+                this.offsetLine = line;
+
+                this.draw();
             }
 
             setLines(lines, types, indexMap) {
@@ -893,36 +877,29 @@
 
                 this.totalHeight = this.lines.length * CONSTANTS.LINE_HEIGHT;
 
-                this.setVirtualAreaSize(this.totalWidth, this.totalHeight);
+                this.onSetVirtualAreaSize(this.totalWidth, this.totalHeight);
 
                 const fontSize = CONSTANTS.LINE_HEIGHT - CONSTANTS.PADDING * 2;
                 this.ctx.font = fontSize + 'px monospace';
                 this.charWidth = this.ctx.measureText('M').width;
 
-                // Отрисовка заголовка
-                const background = this.isSelected(0) ? '#fea' : '#fa6';
-                this.drawLine(this.lines[0], 0, [], widths, background);
-
-                let offset = this.getOffset();
+                let offset = this.offsetLine;
 
                 // Отрисовка строк данных
-                for (let i = 1; i < Math.min(this.maxLines + 1, this.lines.length - offset); i++) {
+                for (let i = 1; i < Math.min(this.maxLines, this.lines.length - offset); i++) {
                     const lineIndex = i + offset;
                     const background = this.isSelected(lineIndex) ? '#fea' : 'white';
 
-                    this.drawLine(this.lines[lineIndex], CONSTANTS.LINE_HEIGHT * i, colors, widths, background);
+                    if (this.lines[lineIndex]) {
+                        this.drawLine(this.lines[lineIndex], CONSTANTS.LINE_HEIGHT * i - this.scrollTopOffset, colors, widths, background);
+                    } else {
+                        debugger;
+                    }
                 }
-            }
 
-            getOffset() {
-                let offset = this.offsetLine;
-                if (offset > this.lines.length - this.maxLines + 1) {
-                    offset = this.lines.length - this.maxLines + 1;
-                }
-                if (offset < 0) {
-                    offset = 0;
-                }
-                return offset;
+                // Отрисовка заголовка
+                const background = this.isSelected(0) ? '#fea' : '#fa6';
+                this.drawLine(this.lines[0], 0, [], widths, background);
             }
 
             isSelected(lineIndex) {
@@ -951,7 +928,7 @@
                     }
                 }
 
-                let offset = this.getOffset();
+                let offset = this.offsetLine;
 
                 for (let j = offset; j < Math.min(offset + this.maxLines, this.lines.length); j++) {
                     const items = this.lines[j];
@@ -1005,6 +982,28 @@
                 const y = e.clientY - rect.top;
                 let line = Math.floor(y / CONSTANTS.LINE_HEIGHT) + this.offsetLine;
                 return Math.min(line, this.lines.length);
+            }
+        }
+
+        class ScrollContainer {
+            constructor(container = document.body) {
+                this.scrollContainer = document.createElement('div');
+                this.scrollContainer.className = 'scroll-container';
+                this.virtualArea = document.createElement('div');
+                this.virtualArea.className = 'virtual-area';
+                this.scrollContainer.appendChild(this.virtualArea);
+                container.appendChild(this.scrollContainer);
+
+                this.scrollContainer.addEventListener('scroll', () => {
+                    const scrollX = this.scrollContainer.scrollLeft;
+                    const scrollY = this.scrollContainer.scrollTop;
+                    this.onScroll(scrollX, scrollY);
+                });
+            }
+
+            setVirtualAreaSize(width, height) {
+                this.virtualArea.style.width = width + 'px';
+                this.virtualArea.style.height = height + 'px';
             }
         }
 
@@ -1100,9 +1099,18 @@
                 this.lines = [];
                 this.types = [];
                 this.tableView = new TableView(container);
-                this.textEditor = new TextEditor(container);
+                this.scrollContainer = new ScrollContainer(container);
+                this.textEditor = new TextEditor(this.scrollContainer.virtualArea);
                 this.filterList = new FilterList(container);
                 this.dropzone = new CSVFileDropzone(container);
+
+                this.scrollContainer.onScroll = (x, y) => {
+                    this.tableView.setScrollValue(x, y);
+                };
+
+                this.tableView.onSetVirtualAreaSize = (w, h) => {
+                    this.scrollContainer.setVirtualAreaSize(w, h);
+                };
 
                 this.textEditor.onEditorOpen = () => {
                     this.dropzone.hide();
@@ -1128,7 +1136,7 @@
                 this.tableView.init();
                 
                 // Привязка обработчиков событий
-                this.tableView.virtualArea.addEventListener('mousedown', e => this.handleMouseDown(e));
+                this.scrollContainer.virtualArea.addEventListener('mousedown', e => this.handleMouseDown(e));
                 document.addEventListener('mousemove', e => this.handleMouseMove(e));
                 document.addEventListener('mouseup', () => this.handleMouseUp());
                 document.addEventListener('keydown', e => this.handleKeyDown(e));
@@ -1193,10 +1201,13 @@
                 // 2. Берем данные для редактора из ОТФИЛЬТРОВАННОГО вида (так видит пользователь)
                 const lines = this.tableView.lines.slice(selectionStart, selectionEnd + 1);
                 
+
+                const scrollTopOffset = this.scrollContainer.scrollContainer.scrollTop % CONSTANTS.LINE_HEIGHT;
+
                 const position = {
-                    top: (selectionStart - this.tableView.offsetLine) * CONSTANTS.LINE_HEIGHT
+                    top: (selectionStart) * CONSTANTS.LINE_HEIGHT
                 };
-                
+
                 const size = {
                     width: this.tableView.totalWidth,
                     height: ((selectionEnd - selectionStart + 1) * CONSTANTS.LINE_HEIGHT)
