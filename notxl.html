@@ -1151,6 +1151,10 @@
             }
 
             handleMouseDown(e) {
+                if (e.target === this.textEditor.textarea) {
+                    return; // Пропускаем обработку, если клик по редактору
+                }
+                
                 this.clearSelection();
 
                 if (this.textEditor.isOpen()) {
