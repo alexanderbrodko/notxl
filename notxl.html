@@ -201,7 +201,7 @@
                         } else {
                             inQuotes = !inQuotes;
                         }
-                    } else if ((char === ',' || char === '\t' || char === ';') && !inQuotes) {
+                    } else if ((char === ',' || char === '\t' || char === ';' || char === '|') && !inQuotes) {
                         currentField = currentField.replace(/[\n\r]/g, ' ').trim();
                         currentLine.push(currentField);
                         currentField = '';
@@ -301,7 +301,7 @@
                         
                         // Выравниваем текст без добавления запятой
                         return cellText.padEnd(targetWidth);
-                    }).join(','); // Добавляем запятые только между ячейками
+                    }).join('|'); // Добавляем запятые только между ячейками
                 }).join('\n');
             }
 
