@@ -377,7 +377,6 @@
             handlePaste(e) {
                 const pastedText = e.clipboardData.getData('text/plain');
                 
-                let maxLines = Math.floor(window.innerHeight / CONSTANTS.LINE_HEIGHT);
                 if (pastedText.split('\n').length > 5) {
                     e.preventDefault();
                     
@@ -778,6 +777,7 @@
 
                 this.lines = [];
                 this.types = [];
+                this.widths = [];
                 this.indexMap = [];
                 this.offsetLine = 0;
                 this.offsetX = 0;
@@ -792,17 +792,19 @@
                 const fontSize = CONSTANTS.LINE_HEIGHT - CONSTANTS.PADDING * 2;
                 this.ctx.font = fontSize + 'px monospace';
                 this.charWidth = this.ctx.measureText('M').width;
-            }
 
-            init() {
                 this.onResize();
                 window.addEventListener('resize', () => this.onResize());
+                window.addEventListener('orientationchange', () => {
+                    // Ждем завершения изменения ориентации
+                    setTimeout(() => this.onResize(), 100);
+                });
             }
 
-            setCanvasSizeRetina() {
+            onResize() {
                 const container = this.canvas.parentElement;
                 const width = container.clientWidth;
-                const height = container.clientHeight;
+                let height = container.clientHeight;
 
                 const pixelRatio = window.devicePixelRatio || 1;
                 // Устанавливаем внутреннее разрешение с учетом pixelRatio
@@ -819,13 +821,14 @@
                 // Сохраняем размеры для расчетов
                 this.displayWidth = width;
                 this.displayHeight = height;
-                
-                // Пересчитываем максимальное количество строк
-                this.maxLines = Math.floor(height / CONSTANTS.LINE_HEIGHT);
-            }
 
-            onResize() {
-                this.setCanvasSizeRetina();
+                // Пересчитываем максимальное количество строк
+                if (window.visualViewport) {
+                    height *= window.visualViewport.scale;
+                }
+                
+                this.maxLines = Math.floor(height / CONSTANTS.LINE_HEIGHT);
+
                 this.draw();
             }
 
@@ -847,6 +850,12 @@
                 this.lines = lines;
                 this.types = types;
                 this.indexMap = indexMap || Array.from({ length: lines.length }, (_, i) => i);
+
+                this.widths = [];
+                for (let type of this.types) {
+                    this.widths.push(CONSTANTS.WIDTHS[type] || 10);
+                }
+                
                 this.draw();
             }
 
@@ -856,23 +865,19 @@
                 if (!this.lines || !this.types) return;
                 if (!this.lines.length || !this.types.length) return;
                 
-                const widths = [];
                 const colors = [];
-                const maxWidths = [];
                 
                 // Подготовка данных для отрисовки
                 for (let type of this.types) {
-                    widths.push(CONSTANTS.WIDTHS[type] || 10);
-                    maxWidths.push(CONSTANTS.MAX_WIDTHS[type] || 30);
                     colors.push(CONSTANTS.COLORS[type] || 'black');
                 }
                 
                 // Корректировка ширины столбцов
-                this.correctWidths(widths, maxWidths);
+                this.correctWidths(this.widths);
                 
                 // Расчет полной ширины таблицы
-                this.totalWidth = CONSTANTS.PADDING * 2 + (this.charWidth | 0) * widths.length + 
-                                (this.charWidth | 0) * widths.reduce((a, b) => a + b) + 
+                this.totalWidth = CONSTANTS.PADDING * 2 + (this.charWidth | 0) * this.widths.length + 
+                                (this.charWidth | 0) * this.widths.reduce((a, b) => a + b) + 
                                 CONSTANTS.SCROLLBAR_WIDTH + 1;
 
                 this.totalHeight = this.lines.length * CONSTANTS.LINE_HEIGHT;
@@ -891,7 +896,8 @@
                     const background = this.isSelected(lineIndex) ? '#fea' : 'white';
 
                     if (this.lines[lineIndex]) {
-                        this.drawLine(this.lines[lineIndex], CONSTANTS.LINE_HEIGHT * i - this.scrollTopOffset, colors, widths, background);
+                        let y = CONSTANTS.LINE_HEIGHT * i - this.scrollTopOffset;
+                        this.drawLine(this.lines[lineIndex], y, colors, this.widths, background);
                     } else {
                         debugger;
                     }
@@ -899,7 +905,7 @@
 
                 // Отрисовка заголовка
                 const background = this.isSelected(0) ? '#fea' : '#fa6';
-                this.drawLine(this.lines[0], 0, [], widths, background);
+                this.drawLine(this.lines[0], 0, [], this.widths, background);
             }
 
             isSelected(lineIndex) {
@@ -914,7 +920,7 @@
                 }
             }
 
-            correctWidths(widths, maxWidths) {
+            correctWidths(widths) {
                 // заголовки обрабатываем отдельно
                 for (let j = 0; j < 1; j++) {
                     const items = this.lines[j];
@@ -922,7 +928,7 @@
                         for (let i = 0; i < items.length; i++) {
                             let item = '' + items[i];
                             if (widths[i] < item.length) {
-                                widths[i] = Math.min(maxWidths[i], item.length);
+                                widths[i] = item.length;
                             }
                         }
                     }
@@ -936,7 +942,7 @@
                         for (let i = 0; i < items.length; i++) {
                             let item = '' + items[i];
                             if (widths[i] < item.length) {
-                                widths[i] = Math.min(maxWidths[i], item.length);
+                                widths[i] = item.length;
                             }
                         }
                     }
@@ -1096,6 +1102,8 @@
         // Главный контроллер приложения
         class CSVApp {
             constructor(container = document.body) {
+                CONSTANTS.LINE_HEIGHT *= window.devicePixelRatio;
+
                 this.lines = [];
                 this.types = [];
                 this.tableView = new TableView(container);
@@ -1133,8 +1141,6 @@
                     this.filterList.setAutocompleteList(this.lines[0]);
                 };
 
-                this.tableView.init();
-                
                 // Привязка обработчиков событий
                 this.scrollContainer.virtualArea.addEventListener('mousedown', e => this.handleMouseDown(e));
                 document.addEventListener('mousemove', e => this.handleMouseMove(e));
@@ -1217,20 +1223,10 @@
                     height: ((selectionEnd - selectionStart + 1) * CONSTANTS.LINE_HEIGHT)
                 };
 
-                const widths = [];
-                const maxWidths = [];
-                
-                for (let type of this.types) {
-                    widths.push(CONSTANTS.WIDTHS[type] || 10);
-                    maxWidths.push(CONSTANTS.MAX_WIDTHS[type] || 30);
-                }
-                
-                this.tableView.correctWidths(widths, maxWidths);
-                
                 // 3. Но запоминаем в textEditor ИСХОДНЫЕ индексы!
                 this.textEditor.setEditRange(sourceStartIndex, sourceEndIndex);
                 
-                this.textEditor.showEditArea(position, size, lines, widths);
+                this.textEditor.showEditArea(position, size, lines, this.tableView.widths);
             }
 
             handleKeyDown(e) {
