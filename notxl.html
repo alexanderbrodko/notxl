@@ -1137,6 +1137,11 @@
             }
         }
 
+        function isMobile() {
+            return 'ontouchstart' in window || window.navigator.maxTouchPoints > 0;
+        }
+
+
         // Главный контроллер приложения
         class CSVApp {
             constructor(container = document.body) {
@@ -1212,7 +1217,9 @@
                 this.tableView.finishSelection();
 
                 // Показ редактора
-                this.showEditor();
+                if (!isMobile()) {
+                    this.showEditor();
+                }
             }
 
             showEditor() {
