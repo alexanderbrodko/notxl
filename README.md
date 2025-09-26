@@ -1,7 +1,7 @@
 Notxl - CSV Editor for Large Datasets
 =====================================
 
-Try now: []
+https://alexanderbrodko.github.io/notxl
 
 Drag & drop your CSV file, or click to start editing. Use Ctrl+F for filtering, Ctrl+T for new columns
 
