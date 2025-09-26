@@ -46,7 +46,9 @@
             bottom: 0;
             padding: 1px;
             box-sizing: border-box;
-            right: 0;
+            width: 100%;
+            padding: 15px;
+            pointer-events: none;
         }
         .filter-line {
             white-space: nowrap;
@@ -60,6 +62,7 @@
             padding: 6px;
             border-radius: 2px;
             background: #fa6;
+            pointer-events: auto;
         }
         .filter-add>i {
             color: lightgray;
@@ -1042,7 +1045,8 @@
 
         class CSVFileDropzone {
             constructor(container = document.body) {
-                this.onDrop = null;
+                this.onDropStart = null;
+                this.onDropProgress = null;
                 
                 this.dropzone = document.createElement('div');
                 this.dropzone.className = 'dropzone';
