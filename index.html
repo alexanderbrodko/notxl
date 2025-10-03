@@ -305,6 +305,7 @@
                 this.textarea.hidden = true;
                 this.editStart = -1;
                 this.editEnd = -1;
+                this.hiddenColumns = [];
                 
                 // Настройка стилей
                 const fontSize = ((CONSTANTS.LINE_HEIGHT - CONSTANTS.PADDING * 2) | 0) + 'px';
@@ -320,14 +321,16 @@
             }
 
             formatCells(content, widths) {
+                const visibleWidths = widths.filter((_, index) => !this.hiddenColumns[index]);
                 return content.map(line => {
-                    return line.map((cell, index) => {
-                        const cellText = String(cell || '');
-                        const targetWidth = widths[index] || cellText.length;
-                        
-                        // Выравниваем текст без добавления запятой
-                        return cellText.padEnd(targetWidth);
-                    }).join('|'); // Добавляем запятые только между ячейками
+                    return line
+                        .filter((_, index) => !this.hiddenColumns[index]) // Сначала фильтруем
+                        .map((cell, index) => {
+                            const cellText = String(cell || '');
+                            const targetWidth = visibleWidths[index] || cellText.length;
+                            return cellText.padEnd(targetWidth);
+                        })
+                        .join('|');
                 }).join('\n');
             }
 
@@ -341,7 +344,7 @@
                         line.map(cell => String(cell || '').replace(/[\n,]/g, '').trim())
                     );
                     
-                    this.textarea.value = this.formatCells(cleanedContent, widths);
+                    this.textarea.value = this.formatCells(cleanedContent, widths, this.hiddenColumns);
                 }
                 this.textarea.focus();
                 this.textarea.select();
@@ -368,6 +371,19 @@
 
                 if (this.onEditorChange) {
                     let lines = CSVParser.parseCSV(this.textarea.value);
+
+                    for (let i = 0; i < lines.length; i++) {
+                        let line = lines[i],
+                            newLine = [];
+                        for (let hidden of this.hiddenColumns) {
+                            if (hidden) {
+                                newLine.push(null);
+                            } else {
+                                newLine.push(line.shift());
+                            }
+                        }
+                        lines[i] = newLine;
+                    }
                     this.onEditorChange(lines);
                 }
             }
@@ -1022,7 +1038,6 @@
                 // Фон строки
                 this.ctx.fillStyle = background;
                 this.ctx.fillRect(0, y, 4096, CONSTANTS.LINE_HEIGHT);
-                    console.log(this.hiddenColumns)
                 
                 // Отрисовка ячеек
                 items.forEach((text, i) => {
@@ -1289,9 +1304,8 @@
                 this.columnSelector = new ColumnSelector(container);
 
                 this.columnSelector.onChange = selectedColumns => {
-                    this.tableView.hiddenColumns = selectedColumns.map(val => !val);
+                    this.tableView.hiddenColumns = this.textEditor.hiddenColumns = selectedColumns.map(val => !val); 
                     this.tableView.draw();
-                    console.log(selectedColumns)
                 };
 
                 this.scrollContainer.onScroll = (x, y) => {
@@ -1415,6 +1429,17 @@
 
                 const { editStart, editEnd } = this.textEditor;
                 const deleteCount = editEnd - editStart + 1;
+
+                for (let i = 0; i < changes.length; i++) {
+                    let line = changes[i],
+                        originalLine = this.lines[editStart + i];
+
+                    for (let j = 0; j < originalLine.length; j++) {
+                        if (line[j] === null) {
+                            line[j] = originalLine[j];
+                        }
+                    }
+                }
 
                 // Создаем новый массив, объединяя части старого и новые изменения
                 // Это избегает мутаций и потенциально быстрее для очень больших массивов
