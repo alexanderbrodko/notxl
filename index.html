@@ -378,7 +378,10 @@
                     for (let i = 0; i < lines.length; i++) {
                         let line = lines[i],
                             newLine = [];
-                        for (let hidden of this.hiddenColumns) {
+                        let columnsCount = Math.max(this.hiddenColumns.length, line.length);
+
+                        for (let j = 0; j < columnsCount; j++) {
+                            let hidden = this.hiddenColumns[j];
                             if (hidden) {
                                 newLine.push(null);
                             } else {
@@ -1448,7 +1451,7 @@
                 this.types = CSVParser.parseTypes(this.lines);
                 this.filterList.refilter();
                 this.filterList.setAutocompleteList(this.lines[0]);
-                this.columnSelector.setColumns(this.lines[0])
+                this.columnSelector.setColumns(this.lines[0]);
             }
 
             applyFilter(newFilter, newColumnsCode, newVars) {
