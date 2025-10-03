@@ -1425,9 +1425,12 @@
                     let line = changes[i],
                         originalLine = this.lines[editStart + i];
 
-                    for (let j = 0; j < originalLine.length; j++) {
-                        if (line[j] === null) {
-                            line[j] = originalLine[j];
+                    // Если это существующая строка, берем значения скрытых колонок из оригинала
+                    if (originalLine) {
+                        for (let j = 0; j < originalLine.length; j++) {
+                            if (line[j] === null) {
+                                line[j] = originalLine[j];
+                            }
                         }
                     }
                 }
