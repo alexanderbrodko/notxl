@@ -28,13 +28,16 @@ Example usage
 -----
 
 
-
-*Add new column `Income` - value is `tinc` or `tnoinc`*
+### Add new column `Income` - value is `tinc` or `tnoinc`
 
 <img width="1043" height="581" alt="image" src="https://github.com/user-attachments/assets/fecb282b-db34-44a8-bcf2-4748b776d856" />
 
 
-
-*Filter columns, list only with income - get 530104 valid records*
+### Filter columns, list only with income - get 530104 valid records
 
 <img width="1043" height="581" alt="image" src="https://github.com/user-attachments/assets/6156dd3a-9544-4b9a-b4e6-df7e4719062b" />
+
+
+
+## 
+https://alexanderbrodko.github.io/notxl
