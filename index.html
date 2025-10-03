@@ -63,6 +63,7 @@
             border-radius: 2px;
             background: #fa6;
             pointer-events: auto;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
         .filter-add>i {
             color: lightgray;
@@ -138,6 +139,39 @@
             width: 0%;
             height: 100%;
             background: #fa6;
+        }
+        .select-columns-button {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: #fa6;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .select-columns-items {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            display: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            min-width: 200px;
+            text-align: left;
+        }
+        .select-columns-items-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+            font-family: monospace;
+            font-size: 12px;
         }
     </style>
 </head>
@@ -780,6 +814,7 @@
                 this.totalWidth = 0;
                 this.totalHeight = 0;
                 this.scrollTopOffset = 0;
+                this.hiddenColumns = [];
 
                 const fontSize = CONSTANTS.LINE_HEIGHT - CONSTANTS.PADDING * 2;
                 this.ctx.font = fontSize + 'px monospace';
@@ -987,9 +1022,12 @@
                 // Фон строки
                 this.ctx.fillStyle = background;
                 this.ctx.fillRect(0, y, 4096, CONSTANTS.LINE_HEIGHT);
+                    console.log(this.hiddenColumns)
                 
                 // Отрисовка ячеек
                 items.forEach((text, i) => {
+                    if (this.hiddenColumns[i]) return;
+
                     text = '' + text;
                     const color = colors[i] || 'black';
                     const width = widths[i] || 20;
@@ -1134,6 +1172,106 @@
             return 'ontouchstart' in window || window.navigator.maxTouchPoints > 0;
         }
 
+        class ColumnSelector {
+            constructor(container) {
+                this.container = container;
+                this.columns = [];
+                this.selectedColumns = [];
+                this.onChange = null;
+                
+                let button = document.createElement('button');
+                button.innerHTML = '≡';
+                button.className = 'select-columns-button';
+                
+                this.panel = document.createElement('div');
+                this.panel.className = 'select-columns-items';
+                
+                button.appendChild(this.panel);
+                this.container.appendChild(button);
+                
+                button.addEventListener('mouseenter', () => this.show());
+                button.addEventListener('mouseleave', (e) => {
+                    if (!this.panel.contains(e.relatedTarget)) {
+                        this.hide();
+                    }
+                });
+                
+                this.panel.addEventListener('mouseleave', (e) => {
+                    if (!button.contains(e.relatedTarget)) {
+                        this.hide();
+                    }
+                });
+            }
+            
+            show() {
+                this.updatePanel();
+                this.panel.style.display = 'block';
+            }
+            
+            hide() {
+                this.panel.style.display = 'none';
+            }
+            
+            updatePanel() {
+                this.panel.innerHTML = '';
+                
+                this.columns.forEach((columnName, index) => {
+                    const item = document.createElement('div');
+                    item.className = 'select-columns-items-item';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.checked = this.selectedColumns[index];
+                    checkbox.style.marginRight = '8px';
+                    
+                    checkbox.addEventListener('change', () => {
+                        this.selectedColumns[index] = checkbox.checked;
+                        
+                        if (this.onChange) {
+                            this.onChange(this.selectedColumns);
+                        }
+                    });
+                    
+                    const label = document.createElement('span');
+                    label.textContent = columnName;
+                    label.style.whiteSpace = 'nowrap';
+                    label.style.overflow = 'hidden';
+                    label.style.textOverflow = 'ellipsis';
+                    label.style.maxWidth = '180px';
+                    
+                    item.appendChild(checkbox);
+                    item.appendChild(label);
+                    this.panel.appendChild(item);
+                });
+            }
+            
+            setColumns(columns) {
+                const oldColumns = this.columns;
+                this.columns = columns;
+                
+                const newSelected = [];
+                
+                columns.forEach((_, index) => {
+                    // По умолчанию все новые колонки включены
+                    newSelected[index] = true;
+                });
+                
+                // Сохраняем предыдущий выбор для существующих колонок
+                oldColumns.forEach((_, oldIndex) => {
+                    if (oldIndex < columns.length) {
+                        newSelected[oldIndex] = this.selectedColumns[oldIndex];
+                    }
+                });
+                
+                this.selectedColumns = newSelected;
+                this.updatePanel();
+                
+                if (this.onChange) {
+                    this.onChange(this.selectedColumns);
+                }
+            }
+
+        }
 
         // Главный контроллер приложения
         class CSVApp {
@@ -1147,6 +1285,14 @@
                 this.textEditor = new TextEditor(this.scrollContainer.virtualArea);
                 this.filterList = new FilterList(container);
                 this.dropzone = new CSVFileDropzone(container);
+
+                this.columnSelector = new ColumnSelector(container);
+
+                this.columnSelector.onChange = selectedColumns => {
+                    this.tableView.hiddenColumns = selectedColumns.map(val => !val);
+                    this.tableView.draw();
+                    console.log(selectedColumns)
+                };
 
                 this.scrollContainer.onScroll = (x, y) => {
                     this.tableView.setScrollValue(x, y);
@@ -1175,6 +1321,7 @@
                     this.types = CSVParser.parseTypes(this.lines);
                     this.filterList.refilter();
                     this.filterList.setAutocompleteList(this.lines[0]);
+                    this.columnSelector.setColumns(this.lines[0])
                 };
 
                 // Привязка обработчиков событий
@@ -1280,6 +1427,7 @@
                 this.types = CSVParser.parseTypes(this.lines);
                 this.filterList.refilter();
                 this.filterList.setAutocompleteList(this.lines[0]);
+                this.columnSelector.setColumns(this.lines[0])
             }
 
             applyFilter(newFilter, newColumnsCode, newVars) {
@@ -1310,10 +1458,12 @@
                 if (lines) {
                     this.filterList.setFilteredCount(lines.length - 1);
                     this.tableView.setLines(lines, types, indexMap);
+                    this.columnSelector.setColumns(lines[0]);
                     return isValid;
                 }
 
                 this.filterList.setFilteredCount(-1);
+                this.columnSelector.setColumns(this.lines[0]);
                 return true;
             }
 
