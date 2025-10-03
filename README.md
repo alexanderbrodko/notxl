@@ -8,10 +8,12 @@ Drag & drop your CSV file, or click to start editing. Use Ctrl+F for filtering, 
 Key Features:
 -------------
 
+- extremely easy to use
 - smooth work with 100+ MB files
 - instant filtering with wildcard patterns
 - calculated columns using JavaScript formulas
-- color formatting
+- view only useful columns
+- pad your data with spaces
 - web available
 
 Perfect For:
