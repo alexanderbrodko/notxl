@@ -374,6 +374,8 @@
                 if (this.textarea.hidden) return;
                 this.hide();
 
+                if (this.textarea.value.trim() === '') return;
+
                 if (this.onEditorChange) {
                     let lines = CSVParser.parseCSV(this.textarea.value);
 
