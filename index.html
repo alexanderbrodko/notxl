@@ -1374,17 +1374,31 @@
 
             showEditor() {
                 const { selectionStart, selectionEnd } = this.tableView;
-                // selectionStart/End - это индексы в ОТФИЛЬТРОВАННОМ массиве (tableView.lines)
-
-                // 1. Получаем исходные индексы с помощью indexMap
-                const sourceStartIndex = this.tableView.indexMap[selectionStart];
-                const sourceEndIndex = this.tableView.indexMap[selectionEnd];
-
-                // 2. Берем данные для редактора из ОТФИЛЬТРОВАННОГО вида (так видит пользователь)
-                const lines = this.tableView.lines.slice(selectionStart, selectionEnd + 1);
                 
+                // 1. Получаем исходные индексы с помощью indexMap
+                let sourceStartIndex, sourceEndIndex;
+                
+                if (!this.tableView.indexMap) {
+                    // Если indexMap не существует, создаем его
+                    this.tableView.indexMap = Array.from({length: this.tableView.lines.length}, (_, i) => i);
+                }
+                
+                // Дополняем indexMap до нужного размера
+                const requiredSize = Math.max(selectionEnd + 1, this.tableView.lines.length);
+                if (this.tableView.indexMap.length < requiredSize) {
+                    const lastIndex = this.tableView.indexMap.length > 0 ? 
+                        this.tableView.indexMap[this.tableView.indexMap.length - 1] : 0;
+                    
+                    for (let i = this.tableView.indexMap.length; i < requiredSize; i++) {
+                        this.tableView.indexMap[i] = lastIndex + (i - this.tableView.indexMap.length + 1);
+                    }
+                }
+                
+                sourceStartIndex = this.tableView.indexMap[selectionStart];
+                sourceEndIndex = this.tableView.indexMap[selectionEnd];
 
-                const scrollTopOffset = this.scrollContainer.scrollContainer.scrollTop % CONSTANTS.LINE_HEIGHT;
+                // 2. Берем данные для редактора из ОТФИЛЬТРОВАННОГО вида
+                const lines = this.tableView.lines.slice(selectionStart, selectionEnd + 1);
 
                 const position = {
                     top: (selectionStart) * CONSTANTS.LINE_HEIGHT
@@ -1395,7 +1409,7 @@
                     height: ((selectionEnd - selectionStart + 1) * CONSTANTS.LINE_HEIGHT)
                 };
 
-                // 3. Но запоминаем в textEditor ИСХОДНЫЕ индексы!
+                // 3. Запоминаем в textEditor ИСХОДНЫЕ индексы!
                 this.textEditor.setEditRange(sourceStartIndex, sourceEndIndex);
                 
                 this.textEditor.showEditArea(position, size, lines, this.tableView.widths);
@@ -1424,29 +1438,28 @@
                 if (!changes) return;
 
                 const { editStart, editEnd } = this.textEditor;
-                const deleteCount = editEnd - editStart + 1;
-
+                
+                // Заменяем или добавляем строки
                 for (let i = 0; i < changes.length; i++) {
-                    let line = changes[i],
-                        originalLine = this.lines[editStart + i];
-
-                    // Если это существующая строка, берем значения скрытых колонок из оригинала
-                    if (originalLine) {
+                    const sourceIndex = editStart + i;
+                    let editedLine = changes[i];
+                    
+                    // Если строка существует в исходном массиве - обновляем её
+                    if (sourceIndex < this.lines.length) {
+                        let originalLine = this.lines[sourceIndex];
+                        
+                        // Восстанавливаем значения скрытых колонок из оригинала
                         for (let j = 0; j < originalLine.length; j++) {
-                            if (line[j] === null) {
-                                line[j] = originalLine[j];
+                            if (editedLine[j] === null) {
+                                editedLine[j] = originalLine[j];
                             }
                         }
+                        
+                        this.lines[sourceIndex] = editedLine;
+                    } else { // Добавляем новую строку
+                        this.lines.push(editedLine);
                     }
                 }
-
-                // Создаем новый массив, объединяя части старого и новые изменения
-                // Это избегает мутаций и потенциально быстрее для очень больших массивов
-                this.lines = [
-                    ...this.lines.slice(0, editStart),
-                    ...changes,
-                    ...this.lines.slice(editEnd + 1)
-                ];
 
                 this.types = CSVParser.parseTypes(this.lines);
                 this.filterList.refilter();
