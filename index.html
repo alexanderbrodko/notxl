@@ -231,6 +231,20 @@
         .cancel-button {
             background: #eee;
         }
+        .text-editor-toggle {
+            outline: none;
+            position: absolute;
+            top: $;
+            left: 0;
+            font-family: monospace;
+            font-size: 8px;
+            padding: 1px;
+            background: #eee;
+            border: 1px solid #ccc;
+            border: none;
+            z-index: 10;
+            overflow: hidden;
+        }
     </style>
 </head>
 <body>
@@ -376,9 +390,28 @@
                 this.textarea.addEventListener('change', () => this.applyChanges());
                 this.textarea.addEventListener('keydown', (e) => this.handleKeyDown(e));
                 this.textarea.addEventListener('paste', e => this.handlePaste(e));
+
+                // Переключатель вида
+                this.formatMode = 'table';
+                this.formatToggle = document.createElement('select');
+                this.formatToggle.size = 2;
+                this.formatToggle.innerHTML = `<option value="table" selected>Tbl</option>
+                                               <option value="csv">CSV</option>`;
+                this.formatToggle.className = 'text-editor-toggle';
+                container.appendChild(this.formatToggle);
+                this.formatToggle.hidden = true;
+
+                // Следим за изменением режима, чтобы обновить отображение
+                this.formatToggle.addEventListener('change', () => {
+                    // Перегенерируем значение в новом формате
+                    this.formatMode = this.formatToggle.value;
+                    const lines = CSVParser.parseCSV(this.textarea.value);
+                    this.textarea.value = this.formatCells(lines, this.widths);
+                    this.resize();
+                });
             }
 
-            formatCells(content, widths) {
+            formatCellsTable(content, widths) {
                 const visibleWidths = widths.filter((_, index) => !this.hiddenColumns[index]);
                 return content.map(line => {
                     return line
@@ -390,6 +423,28 @@
                         })
                         .join('|');
                 }).join('\n');
+            }
+
+            formatCellsCSV(content) {
+                return content.map(line => {
+                    const visibleLine = line.filter((_, index) => !this.hiddenColumns[index]);
+                    return visibleLine.map(cell => {
+                        const str = String(cell || '');
+                        // Экранирование CSV: оборачиваем в кавычки, если есть запятые, кавычки, переносы
+                        if (str.includes('"') || str.includes(',') || str.includes('\n')) {
+                            return `"${str.replace(/"/g, '""')}"`;
+                        }
+                        return str;
+                    }).join(',');
+                }).join('\n');
+            }
+
+            formatCells(content, widths) {
+                if (this.formatMode === 'csv') {
+                    return this.formatCellsCSV(content);
+                } else {
+                    return this.formatCellsTable(content, widths);
+                }
             }
 
             showEditArea(position, size, content, widths) {
@@ -407,11 +462,18 @@
                 this.textarea.focus();
                 this.textarea.select();
 
+                this.widths = widths;
+
+                this.formatToggle.hidden = false;
+                this.formatToggle.style.left = this.textarea.style.left;
+                this.formatToggle.style.top = (position.top + size.height) + 'px';
+
                 this.onEditorOpen?.();
             }
 
             hide() {
                 this.textarea.hidden = true;
+                this.formatToggle.hidden = true;
             }
 
             isOpen() {
@@ -1456,18 +1518,18 @@
             }
 
             handleMouseDown(e) {
-                if (e.target === this.textEditor.textarea) {
-                    return; // Пропускаем обработку, если клик по редактору
+                if (e.target === this.textEditor.textarea ||
+                    e.target === this.textEditor.formatToggle ||
+                    this.textEditor.formatToggle.contains(e.target)
+                ) {
+                  return;
                 }
-                
                 this.tableView.clearSelection();
-
                 if (this.textEditor.isOpen()) {
-                    this.textEditor.applyChanges();
-                    this.textEditor.hide();
-                    return;
+                  this.textEditor.applyChanges();
+                  this.textEditor.hide();
+                  return;
                 }
-
                 this.tableView.startSelection(e);
             }
 
