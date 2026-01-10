@@ -178,6 +178,59 @@
             font-family: monospace;
             font-size: 12px;
         }
+        .merge-dialog {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .merge-dialog-content {
+            background: white;
+            padding: 20px;
+            border-radius: 4px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            width: 80%;
+            max-width: 600px;
+        }
+        .merge-textarea {
+            width: 100%;
+            height: 200px;
+            margin: 10px 0;
+            padding: 8px;
+            box-sizing: border-box;
+            font-family: monospace;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .merge-dialog-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .merge-button, .cancel-button {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .merge-button {
+            background: #fa6;
+            font-weight: bold;
+        }
+        .merge-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .cancel-button {
+            background: #eee;
+        }
     </style>
 </head>
 <body>
@@ -604,6 +657,14 @@
                 this.div.className = 'filter-list';
                 container.appendChild(this.div);
 
+                let mergeBtn = document.createElement('button');
+                mergeBtn.innerHTML = '<i>ctrl</i>+Merge';
+                mergeBtn.className = 'filter-add';
+                this.div.appendChild(mergeBtn);
+                mergeBtn.onclick = (e) => {
+                    this.showMergeDialog();
+                };
+
                 let openFilterBtn = document.createElement('button');
                 openFilterBtn.innerHTML = '<i>ctrl</i>+Filter';
                 openFilterBtn.className = 'filter-add';
@@ -814,6 +875,51 @@
                 }
 
                 return { lines: newTable, indexMap: indexMap };
+            }
+
+            showMergeDialog() {
+                const dialog = document.createElement('div');
+                dialog.className = 'merge-dialog';
+                dialog.innerHTML = `
+                    <div class="merge-dialog-content">
+                        <textarea class="merge-textarea" placeholder="paste CSV here..."></textarea>
+                        <div class="merge-dialog-buttons">
+                            <button class="merge-button" disabled>Merge</button>
+                            <button class="cancel-button">Cancel</button>
+                        </div>
+                    </div>
+                `;
+                
+                document.body.appendChild(dialog);
+                
+                const textarea = dialog.querySelector('.merge-textarea');
+                const mergeButton = dialog.querySelector('.merge-button');
+                const cancelButton = dialog.querySelector('.cancel-button');
+                
+                let mergeData = null;
+                
+                textarea.addEventListener('input', () => {
+                    try {
+                        mergeData = CSVParser.parseCSV(textarea.value);
+                        mergeButton.disabled = mergeData.length === 0;
+                    } catch (error) {
+                        mergeButton.disabled = true;
+                        mergeData = null;
+                    }
+                });
+                
+                mergeButton.addEventListener('click', () => {
+                    if (mergeData && this.onMergeTables) {
+                        this.onMergeTables(mergeData);
+                        document.body.removeChild(dialog);
+                    }
+                });
+                
+                cancelButton.addEventListener('click', () => {
+                    document.body.removeChild(dialog);
+                });
+                
+                setTimeout(() => textarea.focus(), 100);
             }
 
         }
@@ -1329,6 +1435,10 @@
                     return this.applyFilter(newFilter, newColumnsCode, newVars);
                 };
 
+                this.filterList.onMergeTables = (mergeData) => {
+                    this.mergeTables(mergeData);
+                };
+
                 this.dropzone.onDrop = (text) => {
                     this.dropzone.hide();
                     this.lines = CSVParser.parseCSV(text);
@@ -1430,6 +1540,11 @@
                     e.preventDefault();
                     this.textEditor.hide();
                     this.filterList.addLine(this.filterList.genColumnPlaceholder());
+                }
+
+                if (e.ctrlKey && e.code === 'KeyM') {
+                    e.preventDefault();
+                    this.filterList.showMergeDialog();
                 }
 
                 if (e.code === 'Escape') {
@@ -1539,6 +1654,45 @@
                 `;
 
                 return new Function(wrappedCode)();
+            }
+
+            mergeTables(mergeData) {
+                if (!this.lines?.length || !mergeData?.length) return;
+
+                const baseWidth = this.lines[0].length;
+                const mergeWidth = Math.max(...mergeData.map(r => r?.length || 0), 0);
+                const targetWidth = baseWidth + mergeWidth;
+
+                // Создаём результат: сначала все исходные строки, дополненные пустыми значениями
+                const result = this.lines.map(row => {
+                    const newRow = [...(row || [])];
+                    while (newRow.length < targetWidth) newRow.push('');
+                    return newRow;
+                });
+
+                // Мержим данные построчно
+                for (let i = 0; i < mergeData.length; i++) {
+                    if (i >= result.length) {
+                        // Новые строки
+                        const newRow = Array(baseWidth).fill('');
+                        const src = mergeData[i] || [];
+                        for (let j = 0; j < mergeWidth; j++) {
+                            newRow.push(src[j] || '');
+                        }
+                        result.push(newRow);
+                    } else {
+                        // Дополняем существующие
+                        const src = mergeData[i] || [];
+                        for (let j = 0; j < mergeWidth; j++) {
+                            result[i][baseWidth + j] = src[j] || '';
+                        }
+                    }
+                }
+
+                this.lines = result;
+                this.types = CSVParser.parseTypes(this.lines);
+                this.filterList.refilter();
+                this.columnSelector.setColumns(this.lines[0]);
             }
         }
 
