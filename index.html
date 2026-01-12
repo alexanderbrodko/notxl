@@ -412,16 +412,36 @@
             }
 
             formatCellsTable(content, widths) {
-                const visibleWidths = widths.filter((_, index) => !this.hiddenColumns[index]);
+                const visibleIndices = this.hiddenColumns.map((h, i) => !h);
+                const visibleWidths = widths.filter((_, i) => visibleIndices[i]);
+                const formatMap = this.columnFormats || [];
+
                 return content.map(line => {
-                    return line
-                        .filter((_, index) => !this.hiddenColumns[index]) // Сначала фильтруем
-                        .map((cell, index) => {
-                            const cellText = String(cell || '');
-                            const targetWidth = visibleWidths[index] || cellText.length;
-                            return cellText.padEnd(targetWidth);
-                        })
-                        .join('|');
+                    const visibleCells = line.filter((_, idx) => visibleIndices[idx]);
+                    return visibleCells.map((cell, visIdx) => {
+                        // Найдём исходный индекс колонки
+                        let origIdx = -1;
+                        let seen = 0;
+                        for (let i = 0; i < visibleIndices.length; i++) {
+                            if (visibleIndices[i]) {
+                                if (seen === visIdx) {
+                                    origIdx = i;
+                                    break;
+                                }
+                                seen++;
+                            }
+                        }
+                        let cellText = String(cell || '');
+                        if (origIdx !== -1) {
+                            const fmt = formatMap[origIdx];
+                            if (fmt && fmt !== 'auto') {
+                                const digits = (fmt.split('.')[1] || '').length;
+                                cellText = (parseFloat(cell) || 0).toFixed(digits);
+                            }
+                        }
+                        const targetWidth = visibleWidths[visIdx] || cellText.length;
+                        return cellText.padEnd(targetWidth);
+                    }).join('|');
                 }).join('\n');
             }
 
@@ -1237,7 +1257,20 @@
                     text = '' + text;
                     const color = colors[i] || 'black';
                     const width = widths[i] || 20;
-                    const displayText = text.length > width ? text.substring(0, width - 1) + '…' : text;
+                    let displayText = String(text);
+                    if (i < this.types.length) {
+                        if (this.columnFormats && this.columnFormats[i]) {
+                            const fmt = this.columnFormats[i];
+                            if (fmt !== 'auto' && fmt !== 'hidden' && !isNaN(text)) {
+                                const digits = (fmt.split('.')[1] || '').length;
+                                displayText = (parseFloat(text) || 0).toFixed(digits);
+                            }
+                        }
+                    }
+
+                    if (displayText.length > width) {
+                      displayText = displayText.substring(0, width - 1) + '…';
+                    }
                     
                     this.ctx.fillStyle = color;
                     this.ctx.fillText(
@@ -1382,89 +1415,127 @@
             constructor(container) {
                 this.container = container;
                 this.columns = [];
-                this.selectedColumns = [];
+                this.formats = []; // вместо selectedColumns — храним форматы
                 this.onChange = null;
-                
+
                 let button = document.createElement('button');
                 button.innerHTML = '≡';
                 button.className = 'select-columns-button';
-                
+
                 this.panel = document.createElement('div');
                 this.panel.className = 'select-columns-items';
-                
+
                 button.appendChild(this.panel);
                 this.container.appendChild(button);
-                
+
                 button.addEventListener('mouseenter', () => this.show());
                 button.addEventListener('mouseleave', (e) => {
                     if (!this.panel.contains(e.relatedTarget)) {
                         this.hide();
                     }
                 });
-                
+
                 this.panel.addEventListener('mouseleave', (e) => {
                     if (!button.contains(e.relatedTarget)) {
                         this.hide();
                     }
                 });
             }
-            
+
             show() {
                 this.updatePanel();
                 this.panel.style.display = 'block';
             }
-            
+
             hide() {
                 this.panel.style.display = 'none';
             }
-            
+
             updatePanel() {
                 this.panel.innerHTML = '';
-                
+
+                const formatOptions = [
+                    { value: 'hidden', label: 'Hide' },
+                    { value: 'auto',     label: 'Free' },
+                    { value: '0',            label: '0' },
+                    { value: '0.0',        label: '0.0' },
+                    { value: '0.00',     label: '0.00' },
+                    { value: '0.000',    label: '0.000' },
+                ];
+
                 this.columns.forEach((columnName, index) => {
-                    const label = document.createElement('label');
-                    label.className = 'select-columns-items-item';
-                    label.innerHTML = `
-                        <input type="checkbox" ${this.selectedColumns[index] ? 'checked' : ''}>
-                        ${columnName}
-                    `;
-                    
-                    const checkbox = label.querySelector('input');
-                    checkbox.addEventListener('change', () => {
-                        this.selectedColumns[index] = checkbox.checked;
-                        
+                    const container = document.createElement('div');
+                    container.className = 'select-columns-items-item';
+
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = columnName;
+                    nameSpan.style.marginRight = '6px';
+                    nameSpan.style.flex = '1';
+
+                    const select = document.createElement('select');
+                    select.style.fontSize = '12px';
+                    select.style.fontFamily = 'monospace';
+
+                    formatOptions.forEach(opt => {
+                        const option = document.createElement('option');
+                        option.value = opt.value;
+                        option.textContent = opt.label;
+                        select.appendChild(option);
+                    });
+
+                    // Устанавливаем текущее значение
+                    select.value = this.formats[index] || 'auto';
+
+                    select.addEventListener('change', () => {
+                        this.formats[index] = select.value;
                         if (this.onChange) {
-                            this.onChange(this.selectedColumns);
+                            this.onChange(this.getHiddenColumns(), this.getColumnFormats());
                         }
                     });
-                    
-                    this.panel.appendChild(label);
+
+                    container.appendChild(nameSpan);
+                    container.appendChild(select);
+                    this.panel.appendChild(container);
                 });
             }
-            
+
+            getHiddenColumns() {
+                return this.formats.map(fmt => fmt === 'hidden');
+            }
+
+            getColumnFormats() {
+                // Возвращает объект вида { 'Price': '0.00', ... }
+                const result = [];
+                this.columns.forEach((col, i) => {
+                    result.push(this.formats[i] === 'hidden' ? 'auto' : this.formats[i]);
+                });
+                return result;
+            }
+
             setColumns(columns) {
                 const oldColumns = this.columns;
                 this.columns = columns;
-                
-                const newSelected = [];
-                
+
+                const newFormats = [];
+
                 columns.forEach((_, index) => {
-                    // По умолчанию все новые колонки включены
-                    newSelected[index] = true;
+                    // По умолчанию — автоформат
+                    newFormats[index] = 'auto';
                 });
-                
-                // Сохраняем предыдущий выбор для существующих колонок
-                oldColumns.forEach((_, oldIndex) => {
-                    if (oldIndex < columns.length) {
-                        newSelected[oldIndex] = this.selectedColumns[oldIndex];
+
+                // Сохраняем предыдущие форматы для совпадающих колонок
+                oldColumns.forEach((oldCol, oldIndex) => {
+                    const newIndex = columns.indexOf(oldCol);
+                    if (newIndex !== -1 && oldIndex < this.formats.length) {
+                        newFormats[newIndex] = this.formats[oldIndex];
                     }
                 });
-                
-                this.selectedColumns = newSelected;
+
+                this.formats = newFormats;
                 this.updatePanel();
-                
+
                 if (this.onChange) {
-                    this.onChange(this.selectedColumns);
+                    this.onChange(this.getHiddenColumns(), this.getColumnFormats());
                 }
             }
         }
@@ -1484,8 +1555,10 @@
 
                 this.columnSelector = new ColumnSelector(container);
 
-                this.columnSelector.onChange = selectedColumns => {
-                    this.tableView.hiddenColumns = this.textEditor.hiddenColumns = selectedColumns.map(val => !val); 
+                this.columnSelector.onChange = (hiddenColumns, columnFormats) => {
+                    this.tableView.hiddenColumns = this.textEditor.hiddenColumns = hiddenColumns;
+                    this.tableView.columnFormats = columnFormats;
+                    this.textEditor.columnFormats = columnFormats;
                     this.tableView.draw();
                 };
 
