@@ -1213,29 +1213,41 @@
             }
 
             correctWidths(widths) {
-                // заголовки обрабатываем отдельно
-                for (let j = 0; j < 1; j++) {
-                    const items = this.lines[j];
-                    if (items !== undefined) {
-                        for (let i = 0; i < items.length; i++) {
-                            let item = '' + items[i];
-                            if (widths[i] < item.length) {
-                                widths[i] = item.length;
-                            }
+                // Вспомогательная функция: получает отображаемую строку с учётом формата
+                const getDisplayText = (value, colIndex) => {
+                    let text = String(value || '');
+                    const fmt = this.columnFormats?.[colIndex];
+                    if (fmt && fmt !== 'auto' && fmt !== 'hidden' && !isNaN(value)) {
+                        const digits = (fmt.split('.')[1] || '').length;
+                        text = parseFloat(value).toFixed(digits);
+                    }
+                    return text;
+                };
+
+                // Заголовки (только первая строка)
+                const headerLine = this.lines[0];
+                if (headerLine) {
+                    for (let i = 0; i < headerLine.length; i++) {
+                        if (this.hiddenColumns[i]) continue;
+                        const displayText = String(headerLine[i] || '');
+                        if (widths[i] < displayText.length) {
+                            widths[i] = displayText.length;
                         }
                     }
                 }
 
-                let offset = this.offsetLine;
+                // Видимые строки (с учётом прокрутки)
+                const offset = this.offsetLine;
+                const endLine = Math.min(offset + this.maxLines, this.lines.length);
 
-                for (let j = offset; j < Math.min(offset + this.maxLines, this.lines.length); j++) {
+                for (let j = offset; j < endLine; j++) {
                     const items = this.lines[j];
-                    if (items !== undefined) {
-                        for (let i = 0; i < items.length; i++) {
-                            let item = '' + items[i];
-                            if (widths[i] < item.length) {
-                                widths[i] = item.length;
-                            }
+                    if (!items) continue;
+                    for (let i = 0; i < items.length; i++) {
+                        if (this.hiddenColumns[i]) continue;
+                        const displayText = getDisplayText(items[i], i);
+                        if (widths[i] < displayText.length) {
+                            widths[i] = displayText.length;
                         }
                     }
                 }
