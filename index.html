@@ -653,6 +653,10 @@
             }
 
             correctWord(word) {
+                if (word.length < 7) {
+                    return word;
+                }
+
                 // Ищем точное совпадение без учета регистра
                 for (let item of this.autocomplete) {
                     if (item.toLowerCase() === word.toLowerCase()) {
@@ -810,10 +814,9 @@
                 return filter;
             }
 
-            refilter() {
+            getComputedColumns() {
                 let code = '';
                 let newVars = new Set();
-                let wildcardFilter = this.filterLine.input.value;
 
                 for (let filter of this.filters) {
                     let filterStr = filter.input.value;
@@ -830,7 +833,17 @@
                     }
                 }
 
-                return this.onFilterListChange(wildcardFilter, code, Array.from(newVars));
+                return {
+                    code,
+                    newVars: Array.from(newVars)
+                };
+            }
+
+            refilter() {
+                let wildcardFilter = this.filterLine.input.value;
+                let {code, newVars} = this.getComputedColumns();
+
+                return this.onFilterListChange(wildcardFilter, code, newVars);
             }
 
             getNewVariableName(filterStr) {
@@ -1619,6 +1632,8 @@
                 if (!changes) return;
 
                 const { editStart, editEnd } = this.textEditor;
+
+                let {newVars, code} = this.filterList.getComputedColumns();
                 
                 // Заменяем или добавляем строки
                 for (let i = 0; i < changes.length; i++) {
@@ -1633,6 +1648,18 @@
                         for (let j = 0; j < originalLine.length; j++) {
                             if (editedLine[j] === null) {
                                 editedLine[j] = originalLine[j];
+                            }
+                        }
+
+                        // Для строки заголовков убираем вычисляемые колонки
+                        if (i === 0) {
+                            while (true) {
+                                let field = editedLine[editedLine.length - 1];
+                                if (newVars.includes(field)) {
+                                    editedLine.pop();
+                                } else {
+                                    break;
+                                }
                             }
                         }
                         
@@ -1655,11 +1682,14 @@
                     isValid = true;
 
                 if (newColumnsCode) {
+                    let code = this.getFilterCode(newColumnsCode, newVars);
                     try {
-                        let modifier = this.compile(newColumnsCode, newVars);
+                        let modifier = new Function(code)();
                         lines = modifier(this.lines);
                         types = CSVParser.parseTypes(lines);
                     } catch (e) {
+                        console.error(code);
+                        console.error(e);
                         isValid = false;
                     }
                 }
@@ -1685,7 +1715,7 @@
                 return true;
             }
 
-            compile(userCode, newColumns) {
+            getFilterCode(userCode, newColumns) {
                 if (!this.lines) {
                     return;
                 }
@@ -1700,22 +1730,22 @@
 
                 // Оборачиваем пользовательский код для правильной обработки
                 const wrappedCode = `
-                    return function processTable(table) {
-                        "use strict";
-                        let newTable = [[${names.map(name => '"' + name + '"').join(',')}]];
-                        for (let i = 1; i < table.length; i++) {
-                            let [${names.join(',')}] = table[i];
+return function processTable(table) {
+    "use strict";
+    let newTable = [[${names.map(name => '"' + name + '"').join(',')}]];
+    for (let i = 1; i < table.length; i++) {
+        let [${names.join(',')}] = table[i];
 
-                            // Пользовательский код выполняется в контексте строки
-                            ${userCode}
-                            
-                            newTable.push([${names.join(',')}]);
-                        }
-                        return newTable;
-                    }
+        // Пользовательский код выполняется в контексте строки
+        ${userCode}
+        
+        newTable.push([${names.join(',')}]);
+    }
+    return newTable;
+}
                 `;
 
-                return new Function(wrappedCode)();
+                return wrappedCode;
             }
 
             mergeTables(mergeData) {
