@@ -406,24 +406,23 @@
                     // Перегенерируем значение в новом формате
                     this.formatMode = this.formatToggle.value;
                     const lines = CSVParser.parseCSV(this.textarea.value);
-                    this.textarea.value = this.formatCells(lines, this.widths);
+                    this.textarea.value = this.formatCells(lines, false);
                     this.resize();
                 });
             }
 
-            formatCellsTable(content, widths) {
-                const visibleIndices = this.hiddenColumns.map((h, i) => !h);
-                const visibleWidths = widths.filter((_, i) => visibleIndices[i]);
+            formatCells1(content, delimiter = '|', needHide, needPad = true, needEscape = false) {
+                let invisibleIndices = needHide ? this.hiddenColumns : [];
                 const formatMap = this.columnFormats || [];
 
-                return content.map(line => {
-                    const visibleCells = line.filter((_, idx) => visibleIndices[idx]);
+                return content.map((line, lineIdx) => {
+                    let visibleCells = needHide ? line.filter((_, idx) => !invisibleIndices[idx]) : line;
                     return visibleCells.map((cell, visIdx) => {
                         // Найдём исходный индекс колонки
                         let origIdx = -1;
                         let seen = 0;
-                        for (let i = 0; i < visibleIndices.length; i++) {
-                            if (visibleIndices[i]) {
+                        for (let i = 0; i < invisibleIndices.length; i++) {
+                            if (!invisibleIndices[i]) {
                                 if (seen === visIdx) {
                                     origIdx = i;
                                     break;
@@ -432,42 +431,39 @@
                             }
                         }
                         let cellText = String(cell || '');
-                        if (origIdx !== -1) {
+                        if (needEscape && (cellText.includes('"') || cellText.includes(','))) {
+                            cellText = `"${cellText.replace(/"/g, '""')}"`;
+                        }
+                        if (lineIdx !== 0 && origIdx !== -1) {
                             const fmt = formatMap[origIdx];
                             if (fmt && fmt !== 'auto') {
                                 const digits = (fmt.split('.')[1] || '').length;
                                 cellText = (parseFloat(cell) || 0).toFixed(digits);
                             }
                         }
-                        const targetWidth = visibleWidths[visIdx] || cellText.length;
-                        return cellText.padEnd(targetWidth);
-                    }).join('|');
-                }).join('\n');
-            }
 
-            formatCellsCSV(content) {
-                return content.map(line => {
-                    const visibleLine = line.filter((_, index) => !this.hiddenColumns[index]);
-                    return visibleLine.map(cell => {
-                        const str = String(cell || '');
-                        // Экранирование CSV: оборачиваем в кавычки, если есть запятые, кавычки, переносы
-                        if (str.includes('"') || str.includes(',') || str.includes('\n')) {
-                            return `"${str.replace(/"/g, '""')}"`;
+                        if (needPad) {
+                            const visibleWidths = this.widths.filter((_, i) => !this.hiddenColumns[i]);
+                            const targetWidth = visibleWidths[visIdx] || cellText.length;
+                            return cellText.padEnd(targetWidth);
+                        } else {
+                            return cellText;
                         }
-                        return str;
-                    }).join(',');
+                    }).join(delimiter);
                 }).join('\n');
             }
 
-            formatCells(content, widths) {
+            formatCells(content, needHide = true) {
                 if (this.formatMode === 'csv') {
-                    return this.formatCellsCSV(content);
+                    return this.formatCells1(content, ',', needHide, false, true);
                 } else {
-                    return this.formatCellsTable(content, widths);
+                    return this.formatCells1(content, '|', needHide, true, false);
                 }
             }
 
             showEditArea(position, size, content, widths) {
+                this.widths = widths;
+
                 this.textarea.hidden = false;
                 this.textarea.style.width = size.width + 'px';
                 this.textarea.style.top = position.top + 'px';
@@ -481,8 +477,6 @@
                 }
                 this.textarea.focus();
                 this.textarea.select();
-
-                this.widths = widths;
 
                 this.formatToggle.hidden = false;
                 this.formatToggle.style.left = this.textarea.style.left;
@@ -1148,10 +1142,11 @@
                 for (let i = 1; i < Math.min(this.maxLines, this.lines.length - offset); i++) {
                     const lineIndex = i + offset;
                     const background = this.isSelected(lineIndex) ? '#fea' : 'white';
+                    let formats = this.columnFormats || [];
 
                     if (this.lines[lineIndex]) {
                         let y = CONSTANTS.LINE_HEIGHT * i - this.scrollTopOffset;
-                        this.drawLine(this.lines[lineIndex], y, colors, this.widths, background);
+                        this.drawLine(this.lines[lineIndex], y, colors, this.widths, formats, background);
                     } else {
                         debugger;
                     }
@@ -1159,7 +1154,7 @@
 
                 // Отрисовка заголовка
                 const background = this.isSelected(0) ? '#fea' : '#fa6';
-                this.drawLine(this.lines[0], 0, [], this.widths, background);
+                this.drawLine(this.lines[0], 0, [], this.widths, [], background);
             }
 
             isSelected(lineIndex) {
@@ -1253,7 +1248,7 @@
                 }
             }
 
-            drawLine(items, y, colors, widths, background) {
+            drawLine(items, y, colors, widths, formats, background) {
                 let x = CONSTANTS.PADDING - this.offsetX;
                 this.ctx.lineWidth = 1;
                 this.ctx.textBaseline = 'top';
@@ -1271,8 +1266,8 @@
                     const width = widths[i] || 20;
                     let displayText = String(text);
                     if (i < this.types.length) {
-                        if (this.columnFormats && this.columnFormats[i]) {
-                            const fmt = this.columnFormats[i];
+                        if (formats[i]) {
+                            const fmt = formats[i];
                             if (fmt !== 'auto' && fmt !== 'hidden' && !isNaN(text)) {
                                 const digits = (fmt.split('.')[1] || '').length;
                                 displayText = (parseFloat(text) || 0).toFixed(digits);
